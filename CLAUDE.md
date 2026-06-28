@@ -413,23 +413,98 @@ Shows only unworked section/mode spots for the current band. Columns: Time, Age,
 
 # Special Events Tab
 
-Combines scheduled special-event data from multiple sources with live spot feeds. Not a static calendar — shows what's active, what's been spotted today, and what's coming.
+Combines scheduled special-event data from multiple sources with live spot feeds. Not a static calendar — shows what's active and what's coming.
 
-## Data Sources
+## Data Sources and Priority
 
-| Source | Type | Confidence | Notes |
+| Priority | Source | Confidence | Notes |
 |---|---|---|---|
-| ARRL Special Events | HTML scrape | 0.95 | U.S. primary. Multi-page; slow — see performance note. |
-| VA3RJ DX Calendar | HTML scrape | 0.90 | International/current. Structured calendar style. |
-| 425 DX News Calendar | HTML scrape | 0.85 | Supplemental international. Filter for SE language. |
-| 1x1 Callsign DB | HTML scrape | 0.75 | U.S. 1x1 validation only. Failure is non-fatal. |
-| Manual / built-in | Hardcoded | 1.00 | Known recurring events (13 Colonies callsigns, etc.). |
+| 1 | Manual / built-in | 1.00 | Known recurring events (13 Colonies callsigns, etc.). |
+| 2 | ARRL Special Events | 0.95 | U.S. primary. Multi-page; slow — see performance note. |
+| 3 | VA3RJ DX Calendar | 0.90 | International. Not yet implemented. |
+| 4 | 425 DX News Calendar | 0.85 | Supplemental international. Filter for SE language. |
+| 5 | 1x1 Callsign DB | 0.75 | Validation only. Non-fatal if unavailable. |
 
-Show only events with confidence ≥ 0.75. Do not show weak matches unless a future "include possible matches" option is enabled.
+When the same callsign+date appears in multiple sources, the higher-confidence source wins. Lower-confidence source kept as a supplemental note only. Show events with confidence ≥ 0.75.
 
 ### 425 DX Classification
 
 Not every 425 DX item is a special event. Treat as likely SE if text contains: special callsign, special event, anniversary, celebrating, commemorating, award, SES, or QSL/certificate language tied to an event.
+
+425 DX entries parsed from `<code>` blocks: format is `"ENTITY - description with callsigns"`. No `<strong>` tags exist in data rows. Callsigns extracted by regex from description text. "active as CALL" pattern preferred for identifying the special callsign.
+
+## Normalized Event Object
+
+Every source normalizes to this shape. New date-quality fields are required:
+
+```json
+{
+  "eventId": "",
+  "source": "",
+  "title": "",
+  "callSign": "",
+  "callSigns": [],
+  "startDate": "",
+  "endDate": "",
+  "startTimeUtc": "",
+  "endTimeUtc": "",
+  "city": "",
+  "state": "",
+  "locationText": "",
+  "frequencies": [],
+  "bands": [],
+  "qslInfo": "",
+  "certificateInfo": "",
+  "website": "",
+  "description": "",
+  "confidence": 1.0,
+  "rawText": "",
+  "dateQuality": "Exact",
+  "dateWarning": "",
+  "sortStartUtc": "2026-08-29",
+  "lastUpdated": 0
+}
+```
+
+### Date Quality Values
+
+| Value | Meaning |
+|---|---|
+| Exact | Both start and end dates known |
+| Partial | Only one date side known |
+| Unknown | No usable date |
+
+`sortStartUtc` rules:
+- If startDate known: `sortStartUtc` = parsed ISO date of startDate
+- If only endDate known: `sortStartUtc` = parsed ISO date of endDate (DateQuality = Partial)
+- If neither known: `sortStartUtc` = `"9999-12-31"` (DateQuality = Unknown)
+
+Never leave `sortStartUtc` null. Use `"9999-12-31"` as the far-future sentinel.
+
+## Status Computation
+
+Computed client-side. Returns one of 7 status codes:
+
+| Status | Condition | UI Label | Color |
+|---|---|---|---|
+| active | start ≤ now ≤ end | ACTIVE | Green |
+| upcoming | now < start | UPCOMING | Blue |
+| expired | now > end | EXPIRED | Gray |
+| active_unknown_start | no start, now ≤ end | ACTIVE? | Amber |
+| upcoming_unknown_end | has start, now < start, no end | UPCOMING? | Amber |
+| active_unknown_end | has start, now ≥ start, no end | ACTIVE? | Amber |
+| date_unknown | neither date known | DATE UNKNOWN | Dark gray |
+
+Year inference: cross-year end dates bump end to next year. Events whose start is >6 months in the past roll to next year.
+
+## Default Filter Behavior
+
+The default view ("Active + Upcoming") shows only high-confidence, clean records:
+
+**Shown:** active, upcoming (exact dates, any confidence ≥ 0.85)  
+**Hidden:** expired, date_unknown, active_unknown_start, upcoming_unknown_end, active_unknown_end
+
+Uncertain-date records remain in the cache. They become visible when the user selects "All (incl. uncertain)" from the Status filter. They can also appear in a future "Heard Today" section if spotted live.
 
 ## ARRL HTML Parsing
 
@@ -441,30 +516,11 @@ Each event is a `<li>` inside `<ul>` inside `<div class="list2">`. The `<h3>` co
 
 Pagination: detect total from "Results X to Y of N" header, fetch pages with 1500 ms courtesy delay between requests.
 
-Parser extracts: eventId, title, callSign, startDate, endDate, startTimeUtc, endTimeUtc, city, state, locationText, frequencies (MHz strings), bands (derived), qslInfo, certificateInfo, website, description, source, rawText.
-
-**Performance note:** ARRL pagination with up to 10 pages × 1.5 s delay = potentially 15+ seconds per refresh. Always serve cached data immediately; refresh in background. Never block the UI on an ARRL fetch.
-
-## Status Computation
-
-Computed client-side from startDate/endDate strings ("Jun 6", "Jul 19"):
-- **Active**: today is between start and end (end inclusive)
-- **Upcoming**: today is before start
-- **Expired**: today is after end
-
-Year inference: cross-year end dates (e.g., Jun–Jan) bump end to next year. Events whose start is more than 6 months in the past are treated as next year.
+**Performance note:** ARRL pagination with up to 10 pages × 1.5 s delay = potentially 15+ seconds per refresh. Always serve cached data immediately; refresh in background. Never block the UI on an ARRL fetch. Cached events are sent to new WebSocket clients on connect.
 
 ## Callsign Index
 
-After collecting and normalizing events from all sources, build a fast in-memory callsign lookup used by live spot feeds. Keyed by callsign:
-
-```json
-{
-  "WM3PEN": { "eventId": "arrl-wm3pen-2026", "title": "World Soccer Tournament", "source": "ARRL", ... }
-}
-```
-
-For every incoming live spot: check the spotted callsign against the index. If matched, attach an **SE badge** and event metadata to the spot.
+After collecting and normalizing events from all sources, maintain a fast in-memory callsign lookup. Keyed by callsign, used to attach an **SE badge** to matching live spots.
 
 **SE badge** (`<span class="se-event-badge">SE</span>`) appears inline with the callsign in the Live Spots table.
 
@@ -472,26 +528,21 @@ For every incoming live spot: check the spotted callsign against the index. If m
 
 Reuse existing DX Cluster, DX Summit, and RBN feeds. No separate connection for Special Events. Enrich spots on ingest if the callsign is in the SE callsign index.
 
-## Tab UI Sections
+## Tab UI
 
-**Active Now** — Events where current UTC is between start and end.  
-Columns: Call, Event, Source, Dates, Frequencies, Location/Entity, Worked Status, Last Spotted, QSL Info.
+Single sortable table. Filters: Status (Active+Upcoming default; Active Only, Upcoming Only, Expired Only, All), State, Band, Freeform Search.
 
-**Heard Today** — SE callsigns spotted today from any live feed.  
-Columns: Call, Event, Band, Mode, Frequency, Spot Source, Spot Time, Worked Status.
+Default sort: status group first (active < upcoming), then by `sortStartUtc` ascending (date order within group).
 
-**Coming Soon** — Events starting in the next 30 days.  
-Columns: Call, Event, Start, End, Source, Location/Entity, Notes.
+Missing start dates display as **Unknown** (italic, muted). Missing end dates display as **Unknown**.  
+Partial/Unknown date quality shown as a small badge on the Start cell.  
+Source column is sortable.
 
-**Source Health** — One row per SE source showing: Last Refresh, Records Parsed, Records Accepted, Error Count, Status (OK / stale / failed / disabled).
-
-Filters: Status (Active+Upcoming default; Active Only, Upcoming Only, All), State, Band, Freeform Search.  
-Default sort: Active first, then Upcoming by start date ascending.  
 Manual Refresh button (throttled — 60 s minimum between manual refreshes).
 
 ## Fault Tolerance
 
-If any source fails, continue with cached data and remaining sources. Never crash the dashboard because one SE source failed. If HRD is unavailable, show worked status as unknown.
+If any source fails, continue with cached data. Never crash the dashboard because one SE source failed.
 
 ## API Endpoints
 
@@ -506,15 +557,15 @@ Special events are included in Search All Sources. Query matches against callsig
 
 # Tab Order
 
-Tab order is user-configurable and persisted in localStorage.
+Tab order is user-configurable and persisted in localStorage key `dxspots_taborder`.
 
 ## Tab Identity
 
-Each tab has a stable internal ID distinct from its visible label:
+Each tab has a stable internal ID (`TAB_DEFS` in index.html) distinct from its visible label:
 
 | ID | Label |
 |---|---|
-| live | Live Spots |
+| spots | Live Spots |
 | pota | POTA |
 | sota | SOTA |
 | rbn | RBN |
@@ -523,22 +574,29 @@ Each tab has a stable internal ID distinct from its visible label:
 | fd | Field Day |
 | search | Search |
 | console | Console |
-| config | Configuration |
+| config | Layout |
 
 ## Behavior
 
 On startup:
 1. Load saved tab order from localStorage.
-2. Validate against existing tab IDs.
-3. Append any new tab IDs missing from the saved order (at the end).
-4. Remove any saved IDs that no longer exist.
-5. Render tabs in the resulting order.
+2. Validate against existing tab IDs — drop unknown IDs, append missing ones at the end.
+3. Render tabs in the resulting order via `renderTabBar()`.
 
-Default order (when no saved preference exists): live → pota → sota → rbn → se → colonies → fd → search → console → config.
+Tab bar is rebuilt dynamically by `renderTabBar()` — do not add static event listeners to individual tab buttons. The tab bar uses a single delegated click listener on `#tabBar`.
 
-## Settings UI
+Default order: spots → pota → sota → rbn → se → colonies → fd → search → console → config.
 
-In the Configuration tab: a list of tabs in current order with Move Up / Move Down buttons, Save button, and Reset to Default button. Drag-and-drop is a future enhancement.
+## Layout Tab
+
+The **Layout** tab (`data-tab="config"`, `id="configWrapper"`) contains the tab ordering UI:
+
+- List of all tabs in current order with ▲/▼ Move Up / Move Down buttons
+- **Save Order** button — persists to localStorage and re-renders the tab bar
+- **Reset to Default** button — restores default order, saves, and re-renders
+- Confirmation message fades after 2 seconds
+
+Moving a tab up/down re-renders the list immediately for preview; order is not written to localStorage until Save is clicked.
 
 ---
 
@@ -574,7 +632,7 @@ Must tolerate variable spacing, missing comments, and formatting differences. Ma
 * Export dupe-check results
 * HRD / JTAlert integration for 13 Colonies or Field Day (beyond dupe check)
 * SE sources: QRZ forums, RSS feeds, social media, generic web search
-* Special Events drag-and-drop tab reordering (Move Up/Down is sufficient for v1)
+* Special Events drag-and-drop tab reordering in the Layout tab (Move Up/Down is sufficient for v1)
 * 1x1 callsign DB if impractical to scrape (non-fatal)
 
 ---
@@ -604,19 +662,18 @@ All items below are implemented in the working prototype:
 19. Search All and QRZ lookup inputs visually distinct (blue vs amber themes with ✕ clear buttons).
 20. 6m, 2m, and 70cm band/sub-band detection.
 21. Source-aware connection status (Gray/Yellow/Green/Orange/Red).
-22. Special Events tab: ARRL HTML polling, active/upcoming/expired status, sortable table with filters, SE badge in Live Spots, Search All integration, QRZ click support, manual Refresh button (throttled).
+22. Special Events tab: ARRL HTML polling + 425 DX News polling, 7-status classification with date-quality tracking, partial/unknown dates displayed as "Unknown" (never as normal upcoming/active), sortable table with Source column, SE badge in Live Spots, Search All integration, QRZ click support, manual Refresh button (throttled), cached events sent to new WS clients on connect.
+23. Layout tab: user-configurable tab order with Move Up/Down buttons, Save Order, and Reset to Default; persisted in localStorage; tab bar rebuilt dynamically on startup and on save.
 
 ## Next Milestone
 
 Items not yet implemented:
 
 * VA3RJ DX Calendar source and parser.
-* 425 DX News Calendar source and parser (with SE classification).
 * 1x1 callsign DB validation adapter (non-fatal if impractical).
-* Multi-source SE merge and deduplication.
-* SE callsign index used to enrich live spots in real time.
-* Special Events tab redesigned with Active Now / Heard Today / Coming Soon / Source Health sections.
+* Multi-source SE deduplication (ARRL vs 425DX by callsign+date).
+* Special Events tab: Heard Today section (SE callsigns spotted live today).
+* Special Events tab: Source Health section (per-source parse/accept/reject counts).
 * HRD worked status integrated into Special Events tab.
-* User-configurable tab order (Move Up/Down in Configuration tab, saved to localStorage).
 
 The emphasis is on clean, maintainable code that can be expanded in future versions.
