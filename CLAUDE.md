@@ -2,16 +2,16 @@
 
 ## Project Goal
 
-Build **I See Spots (ISS)**, a web application that collects, normalizes, deduplicates, searches, and displays amateur radio spot data from multiple sources.
+Build **Spot On**, a web application that collects, normalizes, deduplicates, searches, and displays amateur radio spot data from multiple sources.
 
 Current goals:
 
 * Manage saved spot sources.
-* Support telnet DX Cluster, DX Summit HTTP, POTA API, SOTA API, RBN telnet, and ARRL Special Events HTML sources.
+* Support telnet DX Cluster, DX Summit HTTP, POTA API, SOTA API, and RBN telnet as live spot sources.
 * Support RBN skimmer filtering by proximity, region, and favorites.
 * Support 13 Colonies as a dedicated event tracking tab.
 * Support Field Day as a dedicated event tracking tab with per-band section matrices and an All-bands totals view.
-* Support Special Events as a dedicated tab showing upcoming and active ARRL special event stations.
+* Support Special Events as a dedicated tab, combining scheduled event data from multiple sources (ARRL, VA3RJ, 425 DX News) with live spot feeds.
 * Support HRD Logbook dupe checking with a persistent floating panel.
 * Allow one or more spot sources to be active simultaneously.
 * Parse incoming data from each source independently using separate parsers.
@@ -21,6 +21,7 @@ Current goals:
 * Provide a global Search All Sources feature.
 * Display UTC and local/configurable clocks.
 * Support optional QRZ XML callsign lookups.
+* Allow the user to set and persist dashboard tab order.
 
 ---
 
@@ -40,7 +41,7 @@ Claude should learn from the current implementation and avoid repeating earlier 
 
 # Important Source-Format Rule
 
-Every spot source has a completely different format. Do not assume DXSpider telnet, DX Summit HTTP, POTA API JSON, SOTA API JSON, and RBN telnet look alike.
+Every spot source has a completely different format. Do not assume sources look alike.
 
 Each source type must have its own parser:
 
@@ -49,6 +50,7 @@ Each source type must have its own parser:
 * POTA API parser
 * SOTA API parser
 * RBN telnet parser
+* Special Events: separate parsers per source (ARRL HTML, VA3RJ HTML, 425 DX HTML)
 
 Do not fix one source by breaking another. Test each source independently.
 
@@ -68,6 +70,9 @@ Local Backend (Node.js / Express)
       ├── HTTP / JSON API    → POTA
       ├── HTTP / JSON API    → SOTA
       ├── TCP / Telnet       → RBN
+      ├── HTTP Scraping      → ARRL Special Events (HTML)
+      ├── HTTP Scraping      → VA3RJ DX Calendar (HTML)
+      ├── HTTP Scraping      → 425 DX News Calendar (HTML)
       └── PowerShell / ADODB → HRD Logbook (.mdb)
 ```
 
@@ -83,7 +88,9 @@ Header: Configure | Connect | Disconnect | [Dupe Check ☐] [Dupe Panel] | Conne
 
 Clock bar: UTC clock | Local clock | Search All [input ✕] [Search]
 
-Tabs: Live Spots | POTA | SOTA | RBN | 13 Colonies | Field Day | Search | Console | Configuration
+Tabs: Live Spots | POTA | SOTA | RBN | Special Events | 13 Colonies | Field Day | Search | Console | Configuration
+
+Tab order is user-configurable and persisted in localStorage. See **Tab Order** section.
 
 Each tab with a spot table follows the Live Spots pattern: sortable columns, filter bar, time-desc default sort, QRZ links on callsigns/spotters.
 
@@ -116,7 +123,9 @@ Two clocks always visible. UTC clock (always UTC). Configurable clock (user-sele
 
 # Spot Sources
 
-Supported types: Telnet DX Cluster, HTTP feed, POTA API, SOTA API, RBN telnet.
+Supported types for live spots: Telnet DX Cluster, HTTP feed, POTA API, SOTA API, RBN telnet.
+
+Special Events sources are separate (see Special Events Tab section).
 
 ## Defaults
 
@@ -162,11 +171,51 @@ Connection status colors: Gray=Disconnected, Yellow=Connecting, Green=Connected,
 
 RBN spots are not shown in Live Spots. Useful for propagation analysis.
 
+## Normalized Special Event
+
+All Special Events sources normalize to this shape:
+
+```json
+{
+  "eventId": "",
+  "source": "",
+  "sourceUrl": "",
+  "title": "",
+  "callSign": "",
+  "callSigns": [],
+  "startDate": "",
+  "endDate": "",
+  "startTimeUtc": "",
+  "endTimeUtc": "",
+  "city": "",
+  "state": "",
+  "locationText": "",
+  "entity": "",
+  "frequencies": [],
+  "bands": [],
+  "modes": [],
+  "qslInfo": "",
+  "certificateInfo": "",
+  "website": "",
+  "description": "",
+  "confidence": 1.0,
+  "tags": [],
+  "rawText": "",
+  "lastUpdated": 0
+}
+```
+
+`callSigns[]` must always be an array (some events have multiple callsigns). `confidence` represents how certain we are that this is a true special-event station. `rawText` is preserved for troubleshooting.
+
 ---
 
 # Deduplication
 
+## Live Spots
 Likely duplicate: same DX Call + same Spotter + frequency within 0.5 kHz + time within 10 minutes. On match: merge `sources[]`, preserve `rawLines[]`, show one row. POTA, SOTA, and RBN are never deduplicated against cluster data.
+
+## Special Events
+Merge events from different sources when callsign and date range match. When merging: keep all source URLs, use the highest confidence value, combine frequencies. Prefer ARRL for U.S. event details; prefer VA3RJ or 425 DX for international event details. Never show the same callsign/event twice.
 
 ---
 
@@ -221,6 +270,8 @@ Voice sub-bands: 1840–2000, 3600–4000, 5330–5405, 7125–7300, 14150–143
 2. Row filters: Band, Mode, Heard Call, Skimmer, Skimmer Grid, Freeform Search.
 
 RBN Start/Stop buttons live in a dedicated `#rbnControlBar` between the filter bar and the table. They must never be placed inside the filter bar — the filter bar uses `flex-wrap: wrap` and extra skimmer controls can cause the bar to grow, pushing off elements at the end.
+
+**Special Events:** Status (Active+Upcoming default; Active Only, Upcoming Only, All), State, Band, Freeform Search.
 
 ---
 
@@ -300,7 +351,7 @@ Persistent floating panel, draggable, always-on-top. Opened by clicking a callsi
 
 ## Mode Normalization
 
-| HRD Mode | ISS Group |
+| HRD Mode | Spot On Group |
 |---|---|
 | CW | CW |
 | SSB / USB / LSB / AM / FM / DSTAR / D-STAR | Voice |
@@ -362,19 +413,37 @@ Shows only unworked section/mode spots for the current band. Columns: Time, Age,
 
 # Special Events Tab
 
-Source type: `special-events-html`. Polls ARRL Special Event Stations HTML listing.
+Combines scheduled special-event data from multiple sources with live spot feeds. Not a static calendar — shows what's active, what's been spotted today, and what's coming.
 
-Default URL: `https://www.arrl.org/special_events/search/page:PAGENUM/model:Event`  
-Default poll interval: 21600 seconds (6 hours). Maximum pages: 10.
+## Data Sources
 
-## HTML Parsing
+| Source | Type | Confidence | Notes |
+|---|---|---|---|
+| ARRL Special Events | HTML scrape | 0.95 | U.S. primary. Multi-page; slow — see performance note. |
+| VA3RJ DX Calendar | HTML scrape | 0.90 | International/current. Structured calendar style. |
+| 425 DX News Calendar | HTML scrape | 0.85 | Supplemental international. Filter for SE language. |
+| 1x1 Callsign DB | HTML scrape | 0.75 | U.S. 1x1 validation only. Failure is non-fatal. |
+| Manual / built-in | Hardcoded | 1.00 | Known recurring events (13 Colonies callsigns, etc.). |
 
-Each event is an `<li>` inside `<ul>` inside `<div class="list2">`.  
-The `<h3>` contains the event title. The `<p>` bold section holds dates/times/callsign in format: `Mon D-Mon D, HHMMz-HHMMz, CALLSIGN`. The rest of the `<p>` is free text containing city/state, organization, frequencies (MHz), QSL info, contact, and website link.
+Show only events with confidence ≥ 0.75. Do not show weak matches unless a future "include possible matches" option is enabled.
 
-Parser extracts: eventId, title, callSign, startDate, endDate, startTimeUtc, endTimeUtc, city, state, locationText, frequencies (MHz strings), bands (derived), qslInfo, certificateInfo, website, description (full body text), source, rawText.
+### 425 DX Classification
 
-Pagination: detects total from "Results X to Y of N" header; fetches pages with 1500 ms delay between requests.
+Not every 425 DX item is a special event. Treat as likely SE if text contains: special callsign, special event, anniversary, celebrating, commemorating, award, SES, or QSL/certificate language tied to an event.
+
+## ARRL HTML Parsing
+
+URL pattern: `https://www.arrl.org/special_events/search/page:PAGENUM/model:Event`
+
+Each event is a `<li>` inside `<ul>` inside `<div class="list2">`. The `<h3>` contains the event title (strip the `<span>` date prefix). The `<p>` bold section holds `Mon D-Mon D, HHMMz-HHMMz, CALLSIGN`. The rest of the `<p>` is free text with city/state, organization, frequencies (MHz), QSL info, contact, and website.
+
+**Critical parser rule:** Use `indexOf('class="list2"')` then `indexOf('<ul>')` to locate the event list. Do NOT use a lazy regex like `/([\s\S]*?)<\/div>/` — it stops at the first nested `</div>` (the nav/pagination div) and finds nothing.
+
+Pagination: detect total from "Results X to Y of N" header, fetch pages with 1500 ms courtesy delay between requests.
+
+Parser extracts: eventId, title, callSign, startDate, endDate, startTimeUtc, endTimeUtc, city, state, locationText, frequencies (MHz strings), bands (derived), qslInfo, certificateInfo, website, description, source, rawText.
+
+**Performance note:** ARRL pagination with up to 10 pages × 1.5 s delay = potentially 15+ seconds per refresh. Always serve cached data immediately; refresh in background. Never block the UI on an ARRL fetch.
 
 ## Status Computation
 
@@ -385,15 +454,44 @@ Computed client-side from startDate/endDate strings ("Jun 6", "Jul 19"):
 
 Year inference: cross-year end dates (e.g., Jun–Jan) bump end to next year. Events whose start is more than 6 months in the past are treated as next year.
 
-## UI
+## Callsign Index
 
-Tab order: Live Spots | POTA | SOTA | RBN | **Special Events** | 13 Colonies | Field Day | Search | Console | Configuration
+After collecting and normalizing events from all sources, build a fast in-memory callsign lookup used by live spot feeds. Keyed by callsign:
 
-Filters: Status (Active+Upcoming default; also Active Only, Upcoming Only, All), State, Band, Freeform Search.  
+```json
+{
+  "WM3PEN": { "eventId": "arrl-wm3pen-2026", "title": "World Soccer Tournament", "source": "ARRL", ... }
+}
+```
+
+For every incoming live spot: check the spotted callsign against the index. If matched, attach an **SE badge** and event metadata to the spot.
+
+**SE badge** (`<span class="se-event-badge">SE</span>`) appears inline with the callsign in the Live Spots table.
+
+## Live Spot Integration
+
+Reuse existing DX Cluster, DX Summit, and RBN feeds. No separate connection for Special Events. Enrich spots on ingest if the callsign is in the SE callsign index.
+
+## Tab UI Sections
+
+**Active Now** — Events where current UTC is between start and end.  
+Columns: Call, Event, Source, Dates, Frequencies, Location/Entity, Worked Status, Last Spotted, QSL Info.
+
+**Heard Today** — SE callsigns spotted today from any live feed.  
+Columns: Call, Event, Band, Mode, Frequency, Spot Source, Spot Time, Worked Status.
+
+**Coming Soon** — Events starting in the next 30 days.  
+Columns: Call, Event, Start, End, Source, Location/Entity, Notes.
+
+**Source Health** — One row per SE source showing: Last Refresh, Records Parsed, Records Accepted, Error Count, Status (OK / stale / failed / disabled).
+
+Filters: Status (Active+Upcoming default; Active Only, Upcoming Only, All), State, Band, Freeform Search.  
 Default sort: Active first, then Upcoming by start date ascending.  
-Manual Refresh button (throttled — 60 s minimum between refreshes).
+Manual Refresh button (throttled — 60 s minimum between manual refreshes).
 
-**SE badge** (`<span class="se-event-badge">SE</span>`) appears inline with the callsign in the Live Spots table when the spot's callsign matches a known special event callsign.
+## Fault Tolerance
+
+If any source fails, continue with cached data and remaining sources. Never crash the dashboard because one SE source failed. If HRD is unavailable, show worked status as unknown.
 
 ## API Endpoints
 
@@ -403,6 +501,44 @@ Manual Refresh button (throttled — 60 s minimum between refreshes).
 ## Search All
 
 Special events are included in Search All Sources. Query matches against callsign, title, location, description, frequencies, QSL info, and website.
+
+---
+
+# Tab Order
+
+Tab order is user-configurable and persisted in localStorage.
+
+## Tab Identity
+
+Each tab has a stable internal ID distinct from its visible label:
+
+| ID | Label |
+|---|---|
+| live | Live Spots |
+| pota | POTA |
+| sota | SOTA |
+| rbn | RBN |
+| se | Special Events |
+| colonies | 13 Colonies |
+| fd | Field Day |
+| search | Search |
+| console | Console |
+| config | Configuration |
+
+## Behavior
+
+On startup:
+1. Load saved tab order from localStorage.
+2. Validate against existing tab IDs.
+3. Append any new tab IDs missing from the saved order (at the end).
+4. Remove any saved IDs that no longer exist.
+5. Render tabs in the resulting order.
+
+Default order (when no saved preference exists): live → pota → sota → rbn → se → colonies → fd → search → console → config.
+
+## Settings UI
+
+In the Configuration tab: a list of tabs in current order with Move Up / Move Down buttons, Save button, and Reset to Default button. Drag-and-drop is a future enhancement.
 
 ---
 
@@ -437,6 +573,9 @@ Must tolerate variable spacing, missing comments, and formatting differences. Ma
 * Contest or Field Day-specific dupe logic
 * Export dupe-check results
 * HRD / JTAlert integration for 13 Colonies or Field Day (beyond dupe check)
+* SE sources: QRZ forums, RSS feeds, social media, generic web search
+* Special Events drag-and-drop tab reordering (Move Up/Down is sufficient for v1)
+* 1x1 callsign DB if impractical to scrape (non-fatal)
 
 ---
 
@@ -466,5 +605,18 @@ All items below are implemented in the working prototype:
 20. 6m, 2m, and 70cm band/sub-band detection.
 21. Source-aware connection status (Gray/Yellow/Green/Orange/Red).
 22. Special Events tab: ARRL HTML polling, active/upcoming/expired status, sortable table with filters, SE badge in Live Spots, Search All integration, QRZ click support, manual Refresh button (throttled).
+
+## Next Milestone
+
+Items not yet implemented:
+
+* VA3RJ DX Calendar source and parser.
+* 425 DX News Calendar source and parser (with SE classification).
+* 1x1 callsign DB validation adapter (non-fatal if impractical).
+* Multi-source SE merge and deduplication.
+* SE callsign index used to enrich live spots in real time.
+* Special Events tab redesigned with Active Now / Heard Today / Coming Soon / Source Health sections.
+* HRD worked status integrated into Special Events tab.
+* User-configurable tab order (Move Up/Down in Configuration tab, saved to localStorage).
 
 The emphasis is on clean, maintainable code that can be expanded in future versions.
