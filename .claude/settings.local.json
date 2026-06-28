@@ -44,7 +44,27 @@
       "Bash(powershell *)",
       "PowerShell(node --check C:\\\\Users\\\\jim\\\\claudedxspots\\\\server.js 2>&1)",
       "PowerShell(& \"C:\\\\Program Files\\\\nodejs\\\\node.exe\" --check C:\\\\Users\\\\jim\\\\claudedxspots\\\\server.js 2>&1)",
-      "WebFetch(domain:www.arrl.org)"
+      "WebFetch(domain:www.arrl.org)",
+      "WebFetch(domain:www.qrz.com)",
+      "WebFetch(domain:www.contestcalendar.com)",
+      "WebFetch(domain:www.dxsummit.fi)",
+      "Bash(Start-Process node *)",
+      "Bash(Start-Sleep -Milliseconds 2000)",
+      "PowerShell(Start-Sleep -Seconds 1; try { $r = Invoke-WebRequest -Uri 'http://localhost:3000/api/special-events' -TimeoutSec 5; $r.StatusCode } catch { \"Not running: $_\" })",
+      "PowerShell($r = Invoke-RestMethod -Uri 'http://localhost:3000/api/special-events' -Method Get -ErrorAction SilentlyContinue; if \\($r\\) { \"Server running, events: $\\($r.events.Count\\)\" } else { \"Server not responding\" })",
+      "PowerShell(Start-Sleep -Seconds 10; $r = Invoke-RestMethod -Uri 'http://localhost:3000/api/special-events' -Method Get; \"Events loaded: $\\($r.events.Count\\)\"; if \\($r.events.Count -gt 0\\) { $r.events[0] | ConvertTo-Json })",
+      "PowerShell(Start-Sleep -Seconds 15; $r = Invoke-RestMethod -Uri 'http://localhost:3000/api/special-events' -Method Get; \"Events loaded: $\\($r.events.Count\\)\"; if \\($r.events.Count -gt 0\\) { Write-Output \"First event:\"; $r.events[0] | ConvertTo-Json -Depth 3 })",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Receive-Job *)",
+      "PowerShell(Start-Sleep -Seconds 20; $r = Invoke-RestMethod -Uri 'http://localhost:3000/api/special-events' -Method Get; \"Events loaded: $\\($r.events.Count\\)\"; if \\($r.events.Count -gt 0\\) { $r.events[0] | ConvertTo-Json -Depth 3 })",
+      "WebFetch(domain:www.va3rj.com)",
+      "WebFetch(domain:www.425dxn.org)",
+      "WebFetch(domain:www.425dxnews.com)",
+      "WebFetch(domain:www.va3rj.on.ca)",
+      "PowerShell($r = Invoke-RestMethod -Uri 'http://localhost:3000/api/special-events' -Method Get; \"Total events: $\\($r.events.Count\\)\"; if \\($r.events.Count -gt 0\\) { $r.events | Group-Object source | ForEach-Object { \"$\\($_.Name\\): $\\($_.Count\\) events\" }; Write-Output \"\"; $r.events | Select-Object -First 5 | ForEach-Object { \"[$\\($_.source\\)] $\\($_.callSign\\): $\\($_.startDate\\)-$\\($_.endDate\\) conf=$\\($_.confidence\\)\" } })",
+      "PowerShell($r = Invoke-RestMethod -Uri 'http://localhost:3000/api/special-events' -Method Get; \"Total events: $\\($r.events.Count\\)\"; $r.events | Group-Object source | ForEach-Object { \"$\\($_.Name\\): $\\($_.Count\\) events\" })",
+      "Bash('C:\\\\Program Files\\\\nodejs\\\\node.exe' -e ' *)",
+      "Bash(C:\\\\Program Files\\\\nodejs\\\\node.exe *)"
     ]
   }
 }
