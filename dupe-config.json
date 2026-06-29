@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "mdbPath": "C:\\Users\\jim\\AppData\\Roaming\\HRDLLC\\HRD Logbook\\HRD My Logbook.mdb",
   "windowType": "24h",
   "customValue": 7,

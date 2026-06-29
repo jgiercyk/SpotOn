@@ -170,6 +170,11 @@ const specialEventsBySource = new Map(); // srcName -> normalized event[]
 let specialEvents = [];
 let specialEventsLastRefresh = 0;
 
+// Propagation data cache (HamQSL solar XML)
+let propData = null;
+let propLastFetch = 0;
+const PROP_POLL_MS = 15 * 60 * 1000; // 15 minutes
+
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_IDX   = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
 
@@ -317,12 +322,13 @@ function getCompositeStatus() {
   }
 
   const connected = [];
+  const errored   = [];
   let hasLive = false, hasError = false, hasConnecting = false;
 
   for (const [name, src] of sourceStates) {
     if (src.status === 'live')                                              { hasLive = true; connected.push(name); }
-    if (src.status === 'error')                                              hasError = true;
-    if (['connecting', 'logging_in', 'polling'].includes(src.status))       hasConnecting = true;
+    if (src.status === 'error')                                             { hasError = true; errored.push(name); }
+    if (['connecting', 'logging_in', 'polling'].includes(src.status))        hasConnecting = true;
   }
 
   let status;
@@ -332,7 +338,7 @@ function getCompositeStatus() {
   else if (hasConnecting)        status = 'connecting';
   else                           status = 'disconnected';
 
-  return { status, connected, running: [...sourceStates.keys()] };
+  return { status, connected, errored, running: [...sourceStates.keys()] };
 }
 
 function broadcastCompositeStatus() {
@@ -1041,6 +1047,7 @@ function scheduleSpecialEventsPoll(srcName) {
 function startSpecialEventsSource(config) {
   const srcName = config.name;
   sourceStates.set(srcName, { type: 'special-events-html', config, pollTimer: null, status: 'polling' });
+  broadcast({ type: 'se_loading', data: { source: srcName } });
   broadcastCompositeStatus();
   pollSpecialEventsSource(srcName).then(() => scheduleSpecialEventsPoll(srcName));
 }
@@ -1185,6 +1192,7 @@ function schedule425DxPoll(srcName) {
 function start425DxSource(config) {
   const srcName = config.name;
   sourceStates.set(srcName, { type: '425dx-se', config, pollTimer: null, status: 'polling' });
+  broadcast({ type: 'se_loading', data: { source: srcName } });
   broadcastCompositeStatus();
   poll425DxSource(srcName).then(() => schedule425DxPoll(srcName));
 }
@@ -1630,6 +1638,10 @@ app.get('/api/special-events', (_req, res) => {
   res.json({ events: specialEvents, lastRefresh: specialEventsLastRefresh });
 });
 
+app.get('/api/propagation', (_req, res) => {
+  res.json(propData || {});
+});
+
 let seManualThrottleAt = 0;
 
 app.post('/api/special-events/refresh', async (_req, res) => {
@@ -1675,6 +1687,579 @@ app.get('/api/debug/http', async (req, res) => {
   }
 });
 
+// --- Propagation data (HamQSL solar XML) ---
+
+function fetchPropXml() {
+  return new Promise((resolve, reject) => {
+    https.get('https://www.hamqsl.com/solarxml.php', { timeout: 10000 }, res => {
+      let raw = '';
+      res.on('data', d => { raw += d; });
+      res.on('end', () => resolve(raw));
+    }).on('error', reject).on('timeout', function() { this.destroy(new Error('timeout')); });
+  });
+}
+
+function parsePropXml(xml) {
+  function tag(name) {
+    const m = new RegExp(`<${name}>([^<]*)</${name}>`).exec(xml);
+    return m ? m[1].trim() : null;
+  }
+  const ssn   = tag('sunspots');
+  const sfi   = tag('solarflux');
+  const aIdx  = tag('aindex');
+  const kIdx  = tag('kindex');
+  const xray  = tag('xray');
+  if (!sfi && !ssn) return null;
+  return {
+    ssn:   ssn  !== null ? parseInt(ssn,  10) : null,
+    sfi:   sfi  !== null ? parseInt(sfi,  10) : null,
+    aIndex: aIdx !== null ? parseInt(aIdx, 10) : null,
+    kIndex: kIdx !== null ? parseFloat(kIdx)   : null,
+    xRay:  xray || null,
+    fetched: Date.now(),
+  };
+}
+
+async function pollPropData() {
+  try {
+    const xml = await fetchPropXml();
+    const parsed = parsePropXml(xml);
+    if (parsed) {
+      propData = parsed;
+      propLastFetch = parsed.fetched;
+      broadcast({ type: 'propagation', data: propData });
+    }
+  } catch (e) {
+    console.error('[prop] fetch error:', e.message);
+  }
+}
+
+setInterval(pollPropData, PROP_POLL_MS);
+pollPropData(); // fetch immediately on startup
+
+// --- Active Nets ---
+
+const NETS_CONFIG_FILE = path.join(__dirname, 'nets-config.json');
+const DEFAULT_NETS_CONFIG = {
+  enabled: true,
+  netloggerEnabled: true,
+  netfinderEnabled: true,
+  refreshNetloggerMinutes: 15,
+  refreshNetfinderMinutes: 15,
+  upcomingWindowMinutes: 120,
+  minimumConfidence: 0.70,
+};
+
+let netsConfig = { ...DEFAULT_NETS_CONFIG };
+let netloggerCache = [];        // last good NetLogger parse
+let netfinderCache = [];        // last good NetFinder parse
+let netsCombined  = [];         // merged result broadcast to clients
+let netsFavorites = [];         // user-defined favorites (from nets-config.json)
+let netloggerPollTimer = null;
+let netfinderPollTimer = null;
+
+const netSourceHealth = {
+  netlogger: { status: 'DISABLED', lastRefresh: null, parsed: 0, accepted: 0, rejected: 0, error: null },
+  netfinder: { status: 'DISABLED', lastRefresh: null, parsed: 0, accepted: 0, rejected: 0, error: null },
+};
+
+const NETS_CONFIG_STALE_NETLOGGER = 10 * 60 * 1000; // 10 min
+const NETS_CONFIG_STALE_NETFINDER = 2 * 60 * 60 * 1000; // 2 hr
+
+function loadNetsConfig() {
+  try {
+    if (fs.existsSync(NETS_CONFIG_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(NETS_CONFIG_FILE, 'utf8'));
+      netsConfig   = { ...DEFAULT_NETS_CONFIG, ...(raw.settings || {}) };
+      netsFavorites = Array.isArray(raw.favorites) ? raw.favorites : [];
+    }
+  } catch (e) {
+    console.error('[nets] config load error:', e.message);
+  }
+}
+
+function saveNetsConfig() {
+  try {
+    fs.writeFileSync(NETS_CONFIG_FILE, JSON.stringify({ settings: netsConfig, favorites: netsFavorites }, null, 2));
+  } catch (e) {
+    console.error('[nets] config save error:', e.message);
+  }
+}
+
+// Detect band from frequency (kHz)
+function freqToBandNets(khz) {
+  if (!khz) return '';
+  return freqToBand(String(khz)); // reuse existing freqToBand
+}
+
+// Detect mode from text
+function modeFromText(text) {
+  if (!text) return '';
+  const t = String(text).toUpperCase();
+  if (/\bFT8\b/.test(t))  return 'FT8';
+  if (/\bFT4\b/.test(t))  return 'FT4';
+  if (/\bRTTY\b/.test(t)) return 'Digital';
+  if (/\bPSK\b/.test(t))  return 'Digital';
+  if (/\bSSB\b|\bUSB\b|\bLSB\b|\bPHONE\b/.test(t)) return 'SSB';
+  if (/\bCW\b/.test(t))   return 'CW';
+  if (/\bFM\b/.test(t))   return 'FM';
+  if (/\bAM\b/.test(t))   return 'AM';
+  if (/\bC4FM\b|\bFUSION\b/.test(t)) return 'C4FM';
+  if (/\bDMR\b/.test(t))  return 'DMR';
+  if (/\bDSTAR\b|D-STAR/.test(t)) return 'D-STAR';
+  if (/\bECHO\b|\bECHOLINK\b/.test(t)) return 'Echolink';
+  if (/\bDIGI\b|\bDIGITAL\b|\bJS8\b/.test(t)) return 'Digital';
+  return '';
+}
+
+function parseFreqKhz(text) {
+  if (!text) return null;
+  const s = String(text).replace(/[, ]/g, '').trim();
+  const n = parseFloat(s);
+  if (isNaN(n) || n <= 0) return null;
+  // Convert MHz to kHz if < 100 (all ham freqs in MHz are < 500)
+  if (n < 100) return Math.round(n * 1000 * 10) / 10;
+  return n; // already kHz
+}
+
+function makeNetId(source, name, freq) {
+  return `${source}-${String(name).toLowerCase().replace(/\s+/g, '-')}-${String(freq).replace(/[^0-9.]/g, '')}`;
+}
+
+// --- NetLogger parser ---
+// Tries JSON API first, falls back to HTML table scraping
+function parseNetLoggerHtml(html) {
+  const nets = [];
+  const seen = new Set();
+
+  // Try JSON in a <pre> or script tag first
+  try {
+    const jsonM = /<pre[^>]*>([\s\S]*?)<\/pre>/i.exec(html) ||
+                  /\[(\s*\{[\s\S]*?\})\s*\]/m.exec(html);
+    if (jsonM) {
+      const arr = JSON.parse('[' + jsonM[1].replace(/^\[/, '').replace(/\]$/, '') + ']');
+      if (Array.isArray(arr) && arr.length) {
+        for (const r of arr) {
+          const name = (r.NetName || r.net_name || r.name || '').trim();
+          if (!name) continue;
+          const freqText = String(r.Frequency || r.frequency || r.freq || '');
+          const freqKhz  = parseFreqKhz(freqText);
+          const mode     = modeFromText(r.Mode || r.mode || r.NetMode || '');
+          const key      = `${name}-${freqText}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          nets.push({
+            netId:        makeNetId('netlogger', name, freqKhz || freqText),
+            source:       'NetLogger',
+            sourceUrl:    'https://www.netlogger.org/',
+            name,
+            frequency:    freqText,
+            frequencyKhz: freqKhz,
+            band:         freqKhz ? freqToBandNets(freqKhz) : (r.Band || r.band || ''),
+            mode:         mode || modeFromText(r.Band || ''),
+            status:       'ACTIVE',
+            startUtc:     r.StartTime || r.start_time || r.StartUTC || null,
+            elapsed:      r.Elapsed || r.elapsed || '',
+            subscribers:  parseInt(r.Subscribers || r.subscribers || 0, 10) || null,
+            openedBy:     (r.OpenedBy || r.opened_by || r.NetControl || '').trim(),
+            location:     (r.Server || r.server || r.Location || '').trim(),
+            description:  (r.Description || r.description || '').trim(),
+            favorite:     false,
+            confidence:   1.00,
+            lastUpdatedUtc: new Date().toISOString(),
+          });
+        }
+        if (nets.length) return nets;
+      }
+    }
+  } catch (_) {}
+
+  // HTML table scraping fallback
+  const tableM = /<table[^>]*>([\s\S]*?)<\/table>/gi;
+  let tableMatch;
+  while ((tableMatch = tableM.exec(html)) !== null) {
+    const tableHtml = tableMatch[1];
+    // Skip tables with no data rows
+    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let rowMatch;
+    const headers = [];
+    let headerFound = false;
+
+    while ((rowMatch = rowRe.exec(tableHtml)) !== null) {
+      const rowHtml = rowMatch[1];
+      const isHeader = /<th[^>]*>/i.test(rowHtml);
+
+      if (isHeader && !headerFound) {
+        const thRe = /<th[^>]*>([\s\S]*?)<\/th>/gi;
+        let thM;
+        while ((thM = thRe.exec(rowHtml)) !== null) {
+          headers.push(stripHtml(thM[1]).toLowerCase().replace(/\s+/g, ' ').trim());
+        }
+        headerFound = true;
+        continue;
+      }
+
+      if (!headerFound) continue;
+      const tdRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      const cells = [];
+      let tdM;
+      while ((tdM = tdRe.exec(rowHtml)) !== null) {
+        cells.push(stripHtml(tdM[1]).trim());
+      }
+      if (cells.length < 2) continue;
+
+      const get = (...keys) => {
+        for (const k of keys) {
+          const idx = headers.findIndex(h => h.includes(k));
+          if (idx >= 0 && idx < cells.length) return cells[idx];
+        }
+        return cells[keys[0]] || '';
+      };
+
+      const name    = get('net', 'name') || cells[0];
+      if (!name || name.length < 2) continue;
+      const freqText = get('freq', 'frequency', 'khz') || cells[1] || '';
+      const freqKhz  = parseFreqKhz(freqText);
+      const key      = `${name}-${freqText}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      nets.push({
+        netId:        makeNetId('netlogger', name, freqKhz || freqText),
+        source:       'NetLogger',
+        sourceUrl:    'https://www.netlogger.org/',
+        name:         name.trim(),
+        frequency:    freqText,
+        frequencyKhz: freqKhz,
+        band:         freqKhz ? freqToBandNets(freqKhz) : '',
+        mode:         modeFromText(get('mode') || ''),
+        status:       'ACTIVE',
+        startUtc:     get('start', 'time', 'utc') || null,
+        elapsed:      get('elapsed') || '',
+        subscribers:  parseInt(get('sub', 'member', 'count') || 0, 10) || null,
+        openedBy:     (get('opened', 'control', 'by') || '').trim(),
+        location:     (get('server', 'location', 'cluster') || '').trim(),
+        description:  '',
+        favorite:     false,
+        confidence:   1.00,
+        lastUpdatedUtc: new Date().toISOString(),
+      });
+    }
+    if (nets.length > 0) break;
+  }
+  return nets;
+}
+
+// --- NetFinder parser ---
+function parseNetFinderHtml(html, upcomingWindowMs) {
+  const nets = [];
+  const now  = Date.now();
+  const seen = new Set();
+
+  // NetFinder page sections: "Happening Now" and "Upcoming"
+  // Try to detect section headings and classify rows accordingly
+  const sectionRe = /<h[23][^>]*>([\s\S]*?)<\/h[23]>|<div[^>]*class="[^"]*section[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+  const tableRe   = /<table[^>]*>([\s\S]*?)<\/table>/gi;
+  let tableMatch;
+
+  // Just parse all tables; classify by row content
+  while ((tableMatch = tableRe.exec(html)) !== null) {
+    const tableHtml = tableMatch[1];
+    const rowRe     = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    const headers   = [];
+    let headerFound = false;
+    let rowMatch;
+
+    while ((rowMatch = rowRe.exec(tableHtml)) !== null) {
+      const rowHtml = rowMatch[1];
+      if (/<th[^>]*>/i.test(rowHtml) && !headerFound) {
+        const thRe = /<th[^>]*>([\s\S]*?)<\/th>/gi;
+        let thM;
+        while ((thM = thRe.exec(rowHtml)) !== null) {
+          headers.push(stripHtml(thM[1]).toLowerCase().replace(/\s+/g, ' ').trim());
+        }
+        headerFound = true;
+        continue;
+      }
+      if (!headerFound) continue;
+      const tdRe  = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      const cells = [];
+      let tdM;
+      while ((tdM = tdRe.exec(rowHtml)) !== null) cells.push(stripHtml(tdM[1]).trim());
+      if (cells.length < 2) continue;
+
+      const get = (...keys) => {
+        for (const k of keys) {
+          const idx = headers.findIndex(h => h.includes(k));
+          if (idx >= 0 && idx < cells.length) return cells[idx];
+        }
+        return '';
+      };
+
+      const name     = get('net', 'name') || cells[0];
+      if (!name || name.length < 2) continue;
+      const freqText = get('freq', 'frequency', 'khz') || '';
+      const freqKhz  = parseFreqKhz(freqText);
+      const startStr = get('start', 'time', 'utc') || '';
+      const key      = `nf-${name}-${freqText}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      // Determine status from start time if parseable
+      let status = 'HAPPENING_NOW';
+      let startMs = null;
+      if (startStr) {
+        try {
+          const d = new Date(startStr.endsWith('Z') ? startStr : startStr + 'Z');
+          startMs = d.getTime();
+          if (!isNaN(startMs)) {
+            const diffMs = startMs - now;
+            if (diffMs > 5 * 60 * 1000) status = 'UPCOMING';
+            else if (diffMs > -60 * 60 * 1000) status = 'HAPPENING_NOW';
+            else status = 'SCHEDULED';
+          }
+        } catch (_) {}
+      }
+
+      nets.push({
+        netId:        makeNetId('netfinder', name, freqKhz || freqText),
+        source:       'NetFinder',
+        sourceUrl:    'https://netfinder.radio/',
+        name:         name.trim(),
+        frequency:    freqText,
+        frequencyKhz: freqKhz,
+        band:         freqKhz ? freqToBandNets(freqKhz) : (get('band') || ''),
+        mode:         modeFromText(get('mode') || ''),
+        status,
+        startUtc:     startStr || null,
+        elapsed:      '',
+        subscribers:  null,
+        openedBy:     (get('control', 'ncs', 'opened') || '').trim(),
+        location:     (get('location', 'region', 'repeater') || '').trim(),
+        description:  (get('desc', 'info', 'notes') || '').trim(),
+        favorite:     false,
+        confidence:   status === 'HAPPENING_NOW' ? 0.80 : 0.75,
+        lastUpdatedUtc: new Date().toISOString(),
+      });
+    }
+  }
+  return nets;
+}
+
+// Merge NetLogger + NetFinder + Favorites, dedup by name+freq proximity
+function mergeNets(nlNets, nfNets, favNets) {
+  const result = [];
+  const usedNf = new Set();
+
+  // Start with NetLogger (highest confidence)
+  for (const nl of nlNets) {
+    const merged = { ...nl, sources: ['NetLogger'] };
+    // Look for a matching NetFinder entry
+    for (let i = 0; i < nfNets.length; i++) {
+      if (usedNf.has(i)) continue;
+      const nf = nfNets[i];
+      const nameMatch = nl.name.toLowerCase().includes(nf.name.toLowerCase().slice(0, 8)) ||
+                        nf.name.toLowerCase().includes(nl.name.toLowerCase().slice(0, 8));
+      const freqMatch = nl.frequencyKhz && nf.frequencyKhz &&
+                        Math.abs(nl.frequencyKhz - nf.frequencyKhz) < 2;
+      if (nameMatch && (freqMatch || !nf.frequencyKhz)) {
+        merged.sources.push('NetFinder');
+        merged.location = merged.location || nf.location;
+        merged.description = merged.description || nf.description;
+        usedNf.add(i);
+        break;
+      }
+    }
+    result.push(merged);
+  }
+
+  // Add unmatched NetFinder entries
+  for (let i = 0; i < nfNets.length; i++) {
+    if (usedNf.has(i)) continue;
+    result.push({ ...nfNets[i], sources: ['NetFinder'] });
+  }
+
+  // Mark favorites on any matching net
+  for (const fav of favNets) {
+    const existing = result.find(n => {
+      const nameMatch = n.name.toLowerCase().includes(fav.name.toLowerCase().slice(0, 6)) ||
+                        fav.name.toLowerCase().includes(n.name.toLowerCase().slice(0, 6));
+      const freqKhz = parseFreqKhz(fav.frequency);
+      const freqMatch = !freqKhz || !n.frequencyKhz || Math.abs(n.frequencyKhz - freqKhz) < 5;
+      return nameMatch && freqMatch;
+    });
+    if (existing) {
+      existing.favorite = true;
+    } else {
+      // Add standalone favorite
+      const freqKhz = parseFreqKhz(fav.frequency);
+      result.push({
+        netId:        makeNetId('favorite', fav.name, fav.frequency),
+        source:       'Favorite',
+        sourceUrl:    '',
+        sources:      ['Favorite'],
+        name:         fav.name,
+        frequency:    fav.frequency || '',
+        frequencyKhz: freqKhz,
+        band:         fav.band || (freqKhz ? freqToBandNets(freqKhz) : ''),
+        mode:         fav.mode || '',
+        status:       'FAVORITE',
+        startUtc:     null,
+        elapsed:      '',
+        subscribers:  null,
+        openedBy:     '',
+        location:     '',
+        description:  fav.notes || '',
+        favorite:     true,
+        schedule:     fav.schedule || '',
+        confidence:   0.70,
+        lastUpdatedUtc: new Date().toISOString(),
+      });
+    }
+  }
+
+  return result;
+}
+
+function broadcastNets() {
+  netsCombined = mergeNets(netloggerCache, netfinderCache, netsFavorites);
+  broadcast({ type: 'nets_refresh', data: {
+    nets: netsCombined,
+    favorites: netsFavorites,
+    sourceHealth: {
+      netlogger: { ...netSourceHealth.netlogger },
+      netfinder: { ...netSourceHealth.netfinder },
+    },
+  }});
+}
+
+async function pollNetLogger() {
+  if (!netsConfig.netloggerEnabled) return;
+  const urls = ['https://www.netlogger.org/', 'https://netlogger.org/'];
+  let html = null;
+  let lastErr = null;
+  for (const url of urls) {
+    try {
+      html = await httpGet(url);
+      break;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[nets] NetLogger fetch failed for ${url}: ${e.message}`);
+    }
+  }
+  if (!html) {
+    netSourceHealth.netlogger.status = 'FAILED';
+    netSourceHealth.netlogger.error  = lastErr ? lastErr.message : 'All URLs failed';
+    console.error('[nets] NetLogger: all URLs failed');
+    if (netloggerCache.length) {
+      netloggerCache = netloggerCache.map(n => ({ ...n, status: 'STALE', confidence: 0.60 }));
+    }
+    broadcastNets();
+    return;
+  }
+  const nets = parseNetLoggerHtml(html);
+  netSourceHealth.netlogger.parsed   = nets.length;
+  netSourceHealth.netlogger.accepted = nets.length;
+  netSourceHealth.netlogger.rejected = 0;
+  netSourceHealth.netlogger.error    = null;
+  netSourceHealth.netlogger.status   = 'OK';
+  netSourceHealth.netlogger.lastRefresh = Date.now();
+  if (nets.length > 0) {
+    netloggerCache = nets;
+  } else {
+    console.log('[nets] NetLogger: 0 nets parsed (possibly no active nets)');
+  }
+  broadcastNets();
+}
+
+async function pollNetFinder() {
+  if (!netsConfig.netfinderEnabled) return;
+  const url = 'https://netfinder.radio/';
+  try {
+    const html = await httpGet(url);
+    const upcomingWindow = (netsConfig.upcomingWindowMinutes || 120) * 60 * 1000;
+    const nets = parseNetFinderHtml(html, upcomingWindow);
+    netSourceHealth.netfinder.parsed   = nets.length;
+    netSourceHealth.netfinder.accepted = nets.length;
+    netSourceHealth.netfinder.rejected = 0;
+    netSourceHealth.netfinder.error    = null;
+    netSourceHealth.netfinder.status   = 'OK';
+    netSourceHealth.netfinder.lastRefresh = Date.now();
+    netfinderCache = nets;
+  } catch (e) {
+    netSourceHealth.netfinder.status = 'FAILED';
+    netSourceHealth.netfinder.error  = e.message;
+    console.error('[nets] NetFinder fetch error:', e.message);
+    if (netfinderCache.length) {
+      netfinderCache = netfinderCache.map(n => ({ ...n, status: 'STALE', confidence: Math.max(0.50, n.confidence - 0.10) }));
+    }
+  }
+  broadcastNets();
+}
+
+function scheduleNetLoggerPoll() {
+  clearTimeout(netloggerPollTimer);
+  netloggerPollTimer = setTimeout(async () => {
+    await pollNetLogger();
+    scheduleNetLoggerPoll();
+  }, (netsConfig.refreshNetloggerMinutes || 2) * 60 * 1000);
+}
+
+function scheduleNetFinderPoll() {
+  clearTimeout(netfinderPollTimer);
+  netfinderPollTimer = setTimeout(async () => {
+    await pollNetFinder();
+    scheduleNetFinderPoll();
+  }, (netsConfig.refreshNetfinderMinutes || 30) * 60 * 1000);
+}
+
+function startNetsPolling() {
+  if (!netsConfig.enabled) return;
+  netSourceHealth.netlogger.status = netsConfig.netloggerEnabled ? 'OK' : 'DISABLED';
+  netSourceHealth.netfinder.status = netsConfig.netfinderEnabled ? 'OK' : 'DISABLED';
+  if (netsConfig.netloggerEnabled) {
+    pollNetLogger().then(() => scheduleNetLoggerPoll());
+  }
+  if (netsConfig.netfinderEnabled) {
+    // Delay NetFinder slightly to not hammer at startup
+    setTimeout(() => pollNetFinder().then(() => scheduleNetFinderPoll()), 5000);
+  }
+}
+
+// REST endpoints for Active Nets
+app.get('/api/nets', (_req, res) => {
+  res.json({
+    nets: netsCombined,
+    favorites: netsFavorites,
+    sourceHealth: {
+      netlogger: { ...netSourceHealth.netlogger },
+      netfinder: { ...netSourceHealth.netfinder },
+    },
+  });
+});
+
+app.post('/api/nets/favorites', (req, res) => {
+  try {
+    const { favorites } = req.body || {};
+    if (!Array.isArray(favorites)) return res.status(400).json({ error: 'favorites must be an array' });
+    netsFavorites = favorites;
+    saveNetsConfig();
+    broadcastNets();
+    res.json({ status: 'ok', count: netsFavorites.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/nets/refresh', (_req, res) => {
+  if (!netsConfig.enabled) return res.status(400).json({ error: 'Active Nets disabled' });
+  Promise.all([
+    netsConfig.netloggerEnabled ? pollNetLogger() : Promise.resolve(),
+    netsConfig.netfinderEnabled ? pollNetFinder() : Promise.resolve(),
+  ]).catch(() => {});
+  res.json({ status: 'refreshing' });
+});
+
 // --- Auto-shutdown when all browser tabs close ---
 
 const SHUTDOWN_DELAY = 15000;
@@ -1718,6 +2303,23 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'special_events_refresh', data: { events: specialEvents, lastRefresh: specialEventsLastRefresh } }));
   }
 
+  // Send cached propagation data if available
+  if (propData) {
+    ws.send(JSON.stringify({ type: 'propagation', data: propData }));
+  }
+
+  // Send cached nets data if available
+  if (netsCombined.length || netsFavorites.length) {
+    ws.send(JSON.stringify({ type: 'nets_refresh', data: {
+      nets: netsCombined,
+      favorites: netsFavorites,
+      sourceHealth: {
+        netlogger: { ...netSourceHealth.netlogger },
+        netfinder: { ...netSourceHealth.netfinder },
+      },
+    }}));
+  }
+
   ws.on('close', () => {
     if (everHadClient && wss.clients.size === 0) scheduleShutdown();
   });
@@ -1725,6 +2327,8 @@ wss.on('connection', (ws) => {
 
 loadEnvFile();
 loadDupeConfig();
+loadNetsConfig();
+startNetsPolling();
 
 server.listen(PORT, () => {
   console.log(`DX Spots server running at http://localhost:${PORT}`);

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>I See Spots</title>
+<title>Spot On</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -69,6 +69,70 @@
   .clock-item  { color: #7eb8f7; }
   .clock-label { color: #7a9ab5; }
 
+  /* Solar propagation metrics (inline in clock bar) */
+  #clockBarSolar {
+    display: flex; align-items: center; gap: 5px; font-size: 11px;
+    color: #8a9ab5; user-select: none; margin: 0 4px;
+    border-left: 1px solid #2a2a4a; border-right: 1px solid #2a2a4a;
+    padding: 0 10px;
+  }
+  #clockBarSolar .prop-label { color: #5a6a80; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
+  #clockBarSolar .prop-sep   { color: #2a3a4a; }
+  #clockBarSolar .prop-age   { color: #3a4a5a; font-size: 10px; }
+  .prop-metric {
+    cursor: help; padding: 1px 3px; border-radius: 3px;
+    transition: background 0.15s; font-size: 11px;
+  }
+  .prop-metric:hover    { background: #1a2030; }
+  .prop-metric .pm-val  { font-weight: 600; }
+  /* Severity classes — subtle, not garish */
+  .prop-good  { color: #5db85d; }
+  .prop-fair  { color: #c8a840; }
+  .prop-poor  { color: #cc6633; }
+  .prop-storm { color: #cc3333; }
+  .prop-unknown { color: #5a6a7a; }
+
+  /* Propagation tooltip popup */
+  #propTooltip {
+    position: fixed; z-index: 9000;
+    background: #10162a; border: 1px solid #2a3a5a;
+    border-radius: 6px; padding: 10px 13px;
+    max-width: 310px; font-size: 11px; line-height: 1.55;
+    color: #bfc7d5; pointer-events: none; display: none;
+    box-shadow: 0 4px 16px #000a;
+    white-space: pre-wrap;
+  }
+  #propTooltip .pt-title { color: #7eb8f7; font-weight: 700; font-size: 12px; margin-bottom: 6px; }
+  #propTooltip .pt-cur   { color: #e6e6e6; font-weight: 600; margin-top: 6px; }
+  #propTooltip .pt-note  { color: #8090a0; font-size: 10px; margin-top: 5px; font-style: italic; }
+
+  /* Column resize handles */
+  .col-resize-handle {
+    position: absolute; right: 0; top: 0; height: 100%; width: 5px;
+    cursor: col-resize; z-index: 1; user-select: none;
+  }
+  .col-resize-handle:hover, .col-resize-handle.dragging { background: #3a5a8a; }
+
+  /* SE event detail popup */
+  #seEventPopup {
+    display: none; position: fixed; z-index: 8500;
+    background: #10162a; border: 1px solid #2a4a7a;
+    border-radius: 8px; padding: 16px 18px;
+    max-width: 480px; min-width: 300px; max-height: 75vh;
+    overflow-y: auto; box-shadow: 0 6px 24px #000c;
+    font-size: 12px; color: #bfc7d5; line-height: 1.55;
+  }
+  #seEventPopup .sep-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  #seEventPopup .sep-call   { font-size: 18px; font-weight: 700; color: #7eb8f7; }
+  #seEventPopup .sep-close  { cursor: pointer; color: #5a6a8a; font-size: 16px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+  #seEventPopup .sep-close:hover { color: #e6e6e6; }
+  #seEventPopup .sep-title  { font-size: 13px; color: #e6e6e6; font-weight: 600; margin-bottom: 8px; }
+  #seEventPopup .sep-row    { display: flex; gap: 6px; margin-bottom: 4px; }
+  #seEventPopup .sep-lbl    { color: #7a9ab5; min-width: 70px; flex-shrink: 0; font-size: 11px; }
+  #seEventPopup .sep-val    { color: #bfc7d5; word-break: break-word; }
+  #seEventPopup .sep-desc   { margin-top: 8px; padding-top: 8px; border-top: 1px solid #1a2a4a; color: #9aacbe; font-size: 11px; line-height: 1.6; }
+  #seEventPopup a           { color: #7eb8f7; }
+
   #searchBarWrap {
     margin-left: auto; display: flex; align-items: center; gap: 6px;
   }
@@ -112,7 +176,7 @@
   .tab-btn {
     padding: 6px 16px; font-size: 12px; background: none;
     border: none; border-bottom: 2px solid transparent; border-radius: 0;
-    color: #8a9bb0; cursor: pointer; transition: color 0.15s;
+    color: #8a9bb0; transition: color 0.15s;
   }
   .tab-btn:hover  { background: none; color: #bfc7d5; }
   .tab-btn.active { color: #7eb8f7; border-bottom-color: #7eb8f7; }
@@ -168,9 +232,10 @@
   th {
     text-align: left; padding: 6px 10px; color: #7eb8f7;
     font-weight: 600; border-bottom: 1px solid #2a2a4a;
-    white-space: nowrap; user-select: none;
+    white-space: nowrap; user-select: none; position: relative;
+    overflow: hidden; text-overflow: ellipsis;
   }
-  td { padding: 4px 10px; border-bottom: 1px solid #1a1a1a; white-space: nowrap; vertical-align: middle; }
+  td { padding: 4px 10px; border-bottom: 1px solid #1a1a1a; white-space: nowrap; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
   tr:hover td { background: #181828; }
 
   td.band-160m { color: #aa88ff; } td.band-80m  { color: #ff8888; }
@@ -457,6 +522,57 @@
   .se-event-badge { display:inline-block; padding:0 4px; border-radius:2px; font-size:9px; font-weight:700; background:#330033; color:#cc88ff; border:1px solid #5a1a5a; margin-left:4px; vertical-align:middle; cursor:help; }
   #seRefreshBar { display:flex; align-items:center; gap:8px; padding:4px 8px; background:#111; border-bottom:1px solid #222; font-size:11px; color:#888; }
   #seRefreshBar button { padding:2px 10px; font-size:11px; }
+
+  /* Active Nets tab */
+  #netsWrapper { flex: 1; overflow-y: auto; display: none; flex-direction: column; }
+  .nets-section { flex-shrink: 0; }
+  .nets-section-hdr {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 14px; background: #12122a; border-bottom: 1px solid #1e1e3a;
+    border-top: 1px solid #1e1e3a; font-size: 11px; font-weight: 700;
+    color: #8090b0; text-transform: uppercase; letter-spacing: 0.04em;
+    cursor: pointer; user-select: none;
+  }
+  .nets-section-hdr:hover { background: #16163a; }
+  .nets-section-hdr .nets-section-title { flex: 1; }
+  .nets-section-hdr .nets-count { color: #5a7aaa; font-weight: 400; font-size: 10px; }
+  .nets-section-hdr .nets-toggle { color: #3a4a6a; font-size: 10px; }
+  .nets-section-body { display: block; }
+  .nets-section-body.collapsed { display: none; }
+  .nets-status-active    { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; background:#004400; color:#44ee44; }
+  .nets-status-happening { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; background:#004400; color:#44ee44; }
+  .nets-status-upcoming  { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; background:#1a1a44; color:#8888ff; }
+  .nets-status-favorite  { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; background:#330033; color:#cc88ff; }
+  .nets-status-stale     { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; background:#332200; color:#cc8833; }
+  .nets-status-unknown   { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:700; background:#1a1a1a; color:#555; }
+  .net-fav-star { cursor: pointer; color: #5a5a5a; font-size: 13px; }
+  .net-fav-star.active { color: #ffcc00; }
+  .net-action-btn { background: #1a2a3a; border: 1px solid #2a4a6a; color: #7eb8f7; border-radius: 3px; padding: 1px 7px; font-size: 10px; cursor: pointer; white-space: nowrap; }
+  .net-action-btn:hover { background: #2a3a5a; }
+  .health-ok     { color: #44cc44; font-weight: 600; }
+  .health-stale  { color: #cc9933; font-weight: 600; }
+  .health-failed { color: #cc3333; font-weight: 600; }
+  .health-disabled { color: #555; }
+
+  /* Net detail popup */
+  #netDetailPopup {
+    display: none; position: fixed; z-index: 8500;
+    background: #10162a; border: 1px solid #2a4a7a;
+    border-radius: 8px; padding: 16px 18px;
+    max-width: 460px; min-width: 300px; max-height: 80vh;
+    overflow-y: auto; box-shadow: 0 6px 24px #000c;
+    font-size: 12px; color: #bfc7d5; line-height: 1.55;
+  }
+  #netDetailPopup .ndp-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px; gap:8px; }
+  #netDetailPopup .ndp-name   { font-size:15px; font-weight:700; color:#e6e6e6; line-height:1.2; }
+  #netDetailPopup .ndp-close  { cursor:pointer; color:#5a6a8a; font-size:16px; line-height:1; flex-shrink:0; }
+  #netDetailPopup .ndp-close:hover { color:#e6e6e6; }
+  #netDetailPopup .ndp-row    { display:flex; gap:6px; margin-bottom:4px; }
+  #netDetailPopup .ndp-lbl    { color:#7a9ab5; min-width:80px; flex-shrink:0; font-size:11px; }
+  #netDetailPopup .ndp-val    { color:#bfc7d5; word-break:break-word; }
+  #netDetailPopup .ndp-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; padding-top:8px; border-top:1px solid #1a2a4a; }
+  #netDetailPopup .ndp-desc   { margin-top:8px; padding-top:8px; border-top:1px solid #1a2a4a; color:#9aacbe; font-size:11px; }
+
   #coloniesWrapper { flex: 1; display: none; flex-direction: column; overflow: hidden; }
   #coloniesSpotsPanel { overflow-y: auto; overflow-x: auto; height: 220px; min-height: 60px; flex-shrink: 0; }
   #coloniesDivider {
@@ -523,31 +639,20 @@
   #skimmerDbTable td { padding: 3px 8px; border-bottom: 1px solid #222; color: #e6e6e6; }
   #skimmerDbTable tr:hover td { background: #22223a; }
 
-  /* Layout tab */
-  #configWrapper { flex: 1; overflow-y: auto; display: none; padding: 28px 36px; }
-  #configWrapper h2 { color: #7eb8f7; font-size: 15px; margin: 0 0 20px; }
-  #configWrapper h3 { color: #bfc7d5; font-size: 12px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.06em; margin: 24px 0 10px; border-bottom: 1px solid #2a2a4a; padding-bottom: 4px; }
-  .tab-order-list { max-width: 340px; }
-  .tab-order-row { display: flex; align-items: center; gap: 8px; padding: 5px 0;
-    border-bottom: 1px solid #181828; }
-  .tab-order-label { flex: 1; font-size: 13px; color: #e6e6e6; }
-  .tab-order-btn { padding: 1px 9px; font-size: 12px; background: #23233a;
-    border: 1px solid #3a3a6a; border-radius: 3px; color: #bfc7d5; cursor: pointer; }
-  .tab-order-btn:hover:not(:disabled) { background: #3a3a6a; color: #e6e6e6; }
-  .tab-order-btn:disabled { opacity: 0.25; cursor: default; }
-  .tab-order-actions { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
-  #tabOrderMsg { font-size: 11px; color: #80d880; }
+  /* Draggable tab bar */
+  .tab-btn { cursor: default; }
+  .tab-btn.dragging { opacity: 0.35; cursor: grabbing; }
+  .tab-btn.drag-over { box-shadow: -2px 0 0 0 #7eb8f7; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>I See Spots</h1>
+  <h1>Spot On</h1>
   <button id="btnConfigure">Configure</button>
   <button id="btnConnect">Connect</button>
   <button id="btnDisconnect" disabled>Disconnect</button>
-  <label id="dupeToggleLabel"><input type="checkbox" id="dupeToggle"> Dupe Check</label>
+  <label id="dupeToggleLabel"><input type="checkbox" id="dupeToggle"> Dupe Mode</label>
   <button id="btnShowDupePanel">Dupe Panel</button>
   <span id="statusBadge" class="disconnected">Disconnected</span>
 </header>
@@ -555,6 +660,19 @@
 <div id="clockBar">
   <span class="clock-item"><span class="clock-label">UTC </span><span id="clockUTC">--:--:--</span></span>
   <span class="clock-item"><span class="clock-label">Local </span><span id="clockLocal">--:--:--</span></span>
+  <span id="clockBarSolar">
+    <span class="prop-label">Solar</span>
+    <span class="prop-metric prop-unknown" data-metric="ssn" id="propSSN">SSN <span class="pm-val">--</span></span>
+    <span class="prop-sep">|</span>
+    <span class="prop-metric prop-unknown" data-metric="sfi" id="propSFI">SFI <span class="pm-val">--</span></span>
+    <span class="prop-sep">|</span>
+    <span class="prop-metric prop-unknown" data-metric="a"   id="propA">A <span class="pm-val">--</span></span>
+    <span class="prop-sep">|</span>
+    <span class="prop-metric prop-unknown" data-metric="kp"  id="propKp">Kp <span class="pm-val">--</span></span>
+    <span class="prop-sep">|</span>
+    <span class="prop-metric prop-unknown" data-metric="xray" id="propXRay">X-Ray <span class="pm-val">--</span></span>
+    <span class="prop-age" id="propAge"></span>
+  </span>
   <div id="searchBarWrap">
     <label>Search All</label>
     <span class="input-x-wrap">
@@ -563,6 +681,7 @@
     <button id="btnGlobalSearch">Search</button>
   </div>
 </div>
+<div id="propTooltip"></div>
 
 <div id="tabBar">
   <button class="tab-btn active" data-tab="spots">Live Spots</button>
@@ -574,7 +693,6 @@
   <button class="tab-btn" data-tab="fd">Field Day</button>
   <button class="tab-btn" data-tab="search">Search</button>
   <button class="tab-btn" data-tab="console">Console</button>
-  <button class="tab-btn" data-tab="config">Layout</button>
 </div>
 
 <!-- Live Spots filters -->
@@ -787,6 +905,108 @@
   </div>
 </div>
 
+<!-- Active Nets filters -->
+<div id="netsFilters" class="filter-bar" style="display:none">
+  <label>Status</label>
+  <select id="netsFilterStatus">
+    <option value="">All</option>
+    <option value="ACTIVE">Active Now</option>
+    <option value="UPCOMING">Coming Soon</option>
+    <option value="FAVORITE">Favorites</option>
+    <option value="STALE">Stale</option>
+  </select>
+  <label>Band</label>
+  <select id="netsFilterBand"><option value="">All Bands</option>
+    <option>160m</option><option>80m</option><option>60m</option><option>40m</option>
+    <option>30m</option><option>20m</option><option>17m</option><option>15m</option>
+    <option>12m</option><option>10m</option><option>6m</option><option>2m</option><option>70cm</option>
+  </select>
+  <label>Mode</label>
+  <select id="netsFilterMode"><option value="">All Modes</option>
+    <option>SSB</option><option>CW</option><option>FM</option><option>AM</option>
+    <option>FT8</option><option>Digital</option><option>C4FM</option><option>DMR</option><option>Echolink</option>
+  </select>
+  <label>Search</label>
+  <input type="text" id="netsFilterText" class="short-input" placeholder="name, freq, call…">
+  <label title="Show only nets marked as favorites"><input type="checkbox" id="netsFilterFav"> Fav Only</label>
+  <button id="netsBtnClear">Clear</button>
+  <button id="netsBtnRefresh">Refresh</button>
+  <span id="netsLastRefresh" class="spot-count"></span>
+</div>
+
+<!-- Active Nets tab panel -->
+<div id="netsWrapper" style="display:none">
+  <!-- Active Now -->
+  <div class="nets-section">
+    <div class="nets-section-hdr" data-section="netsActiveBody">
+      <span class="nets-section-title">&#9632; Active Now</span>
+      <span class="nets-count" id="netsActiveCount">0</span>
+      <span class="nets-toggle">&#9660;</span>
+    </div>
+    <div class="nets-section-body" id="netsActiveBody">
+      <table id="netsActiveTable" class="nets-table">
+        <thead><tr>
+          <th>Status</th><th>Net Name</th><th>Freq</th><th>Band</th><th>Mode</th>
+          <th>Start</th><th>Elapsed</th><th>Subs</th><th>Location</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="netsActiveBody_tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <!-- Coming Soon -->
+  <div class="nets-section">
+    <div class="nets-section-hdr" data-section="netsUpcomingBody">
+      <span class="nets-section-title">&#9632; Coming Soon</span>
+      <span class="nets-count" id="netsUpcomingCount">0</span>
+      <span class="nets-toggle">&#9660;</span>
+    </div>
+    <div class="nets-section-body" id="netsUpcomingBody">
+      <table id="netsUpcomingTable" class="nets-table">
+        <thead><tr>
+          <th>Status</th><th>Net Name</th><th>Start</th><th>Freq</th><th>Band</th><th>Mode</th>
+          <th>Location</th><th>Source</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="netsUpcomingBody_tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <!-- Favorites -->
+  <div class="nets-section">
+    <div class="nets-section-hdr" data-section="netsFavBody">
+      <span class="nets-section-title">&#9733; Favorites</span>
+      <span class="nets-count" id="netsFavCount">0</span>
+      <span class="nets-toggle">&#9660;</span>
+    </div>
+    <div class="nets-section-body" id="netsFavBody">
+      <table id="netsFavTable" class="nets-table">
+        <thead><tr>
+          <th>&#9733;</th><th>Net Name</th><th>Schedule</th><th>Freq</th><th>Band</th><th>Mode</th><th>Notes</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="netsFavBody_tbody"></tbody>
+      </table>
+      <div style="padding:8px 14px">
+        <button id="btnAddFavoriteNet" style="font-size:11px">+ Add Favorite Net</button>
+      </div>
+    </div>
+  </div>
+  <!-- Source Health -->
+  <div class="nets-section">
+    <div class="nets-section-hdr" data-section="netsHealthBody">
+      <span class="nets-section-title">&#9736; Source Health</span>
+      <span class="nets-toggle">&#9660;</span>
+    </div>
+    <div class="nets-section-body" id="netsHealthBody">
+      <table id="netsHealthTable" class="nets-table">
+        <thead><tr>
+          <th>Source</th><th>Last Refresh</th><th>Parsed</th><th>Accepted</th><th>Rejected</th><th>Status</th><th>Error</th>
+        </tr></thead>
+        <tbody id="netsHealthBody_tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div id="netDetailPopup"></div>
+
 <!-- 13 Colonies filters -->
 <div id="coloniesFilters" class="filter-bar" style="display:none">
   <label>Band</label>
@@ -983,6 +1203,9 @@
   </div>
 </div>
 
+<!-- Special Events detail popup -->
+<div id="seEventPopup"></div>
+
 <!-- Search results -->
 <div id="searchWrapper" class="table-wrapper">
   <table id="searchTable">
@@ -995,18 +1218,6 @@
 </div>
 
 <div id="consolePanel"></div>
-
-<!-- Layout tab panel -->
-<div id="configWrapper">
-  <h2>Layout</h2>
-  <h3>Tab Order</h3>
-  <div class="tab-order-list" id="tabOrderList"></div>
-  <div class="tab-order-actions">
-    <button id="btnSaveTabOrder">Save Order</button>
-    <button id="btnResetTabOrder">Reset to Default</button>
-    <span id="tabOrderMsg"></span>
-  </div>
-</div>
 
 <!-- QRZ Popup -->
 <div id="qrzPopup" class="hidden">
@@ -1041,10 +1252,10 @@
   <a id="summitPopupLink" href="#" target="_blank" rel="noreferrer" class="hidden">View on SOTAwatch</a>
 </div>
 
-<!-- Dupe Check Panel -->
+<!-- Dupe Mode Panel -->
 <div id="dupePanel" class="hidden">
   <div id="dupePanelHeader">
-    <span id="dupePanelTitle">Dupe Check</span>
+    <span id="dupePanelTitle">Dupe Mode</span>
     <button class="btn-popup-close" id="btnDupePanelClose">&#x2715;</button>
   </div>
   <div id="dupePanelContent">
@@ -1164,7 +1375,7 @@
       <button id="btnQrzSave" class="btn-qrz-action">Save Credentials</button>
       <button id="btnQrzTest" class="btn-qrz-action">Test QRZ Login</button>
     </div>
-    <h3>HRD Dupe Check</h3>
+    <h3>HRD Dupe Mode</h3>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <input type="checkbox" id="cfgDupeEnabled" style="accent-color:#c0a8f0;width:14px;height:14px;cursor:pointer;">
       <label for="cfgDupeEnabled" style="font-size:12px;color:#aaa;cursor:pointer;">Enable HRD Logbook dupe checking</label>
@@ -1700,21 +1911,24 @@
   let specialEvents    = [];
   let seLastRefresh    = 0;
   let seCallsignSet    = new Set(); // for live-spot indicator
+  let seLoadingSources = new Set(); // sources actively fetching SE data
+  let netsData         = { nets: [], favorites: [], sourceHealth: {} };
   let searchResults= [];
   let ws               = null;
   let wsReconnectTimer = null;
   let editingSourceIdx = null;
+  let propData         = null;     // current propagation data from server
   const TAB_DEFS = {
     spots:    'Live Spots',
     pota:     'POTA',
     sota:     'SOTA',
     rbn:      'RBN',
     se:       'Special Events',
+    nets:     'Active Nets',
     colonies: '13 Colonies',
     fd:       'Field Day',
     search:   'Search',
     console:  'Console',
-    config:   'Layout',
   };
   const DEFAULT_TAB_ORDER = Object.keys(TAB_DEFS);
   const KEY_TAB_ORDER = 'dxspots_taborder';
@@ -1798,19 +2012,20 @@
     show('rbnWrapper',       tab === 'rbn'      ? 'block' : 'none');
     show('seFilters',        tab === 'se'       ? 'flex'  : 'none');
     show('seWrapper',        tab === 'se'       ? 'flex'  : 'none');
+    show('netsFilters',      tab === 'nets'     ? 'flex'  : 'none');
+    show('netsWrapper',      tab === 'nets'     ? 'flex'  : 'none');
     show('coloniesFilters',  tab === 'colonies' ? 'flex'  : 'none');
     show('coloniesWrapper',  tab === 'colonies' ? 'flex'  : 'none');
     show('fdFilters',        tab === 'fd'       ? 'flex'  : 'none');
     show('fdWrapper',        tab === 'fd'       ? 'flex'  : 'none');
     show('searchWrapper',    tab === 'search'   ? 'block' : 'none');
     show('consolePanel',     tab === 'console'  ? 'block' : 'none');
-    show('configWrapper',    tab === 'config'   ? 'block' : 'none');
     if (tab === 'console')  scrollConsoleToBottom();
-    if (tab === 'config')   renderTabOrderUI();
     if (tab === 'pota')     renderPotaTable();
     if (tab === 'sota')     renderSotaTable();
     if (tab === 'rbn')      { renderRbnTable(); renderRbnControls(); }
     if (tab === 'se')       renderSeTable();
+    if (tab === 'nets')     renderNetsTab();
     if (tab === 'colonies') { renderColoniesMatrix(); renderColoniesSpotTable(); }
     if (tab === 'fd')       renderFdPanel();
     if (tab === 'search')   renderSearchResults();
@@ -1859,27 +2074,40 @@
   function renderTabBar() {
     const bar = document.getElementById('tabBar');
     bar.innerHTML = '';
-    tabOrder.forEach(id => {
+    let dragSrcIdx = null;
+
+    tabOrder.forEach((id, idx) => {
       const btn = document.createElement('button');
       btn.className = 'tab-btn' + (id === currentTab ? ' active' : '');
       btn.dataset.tab = id;
       btn.textContent = TAB_DEFS[id];
-      bar.appendChild(btn);
-    });
-  }
+      btn.draggable = true;
 
-  function renderTabOrderUI() {
-    const list = document.getElementById('tabOrderList');
-    list.innerHTML = '';
-    tabOrder.forEach((id, idx) => {
-      const row = document.createElement('div');
-      row.className = 'tab-order-row';
-      row.innerHTML = `
-        <span class="tab-order-label">${esc(TAB_DEFS[id] || id)}</span>
-        <button class="tab-order-btn" data-dir="up"   data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>&#9650;</button>
-        <button class="tab-order-btn" data-dir="down" data-idx="${idx}" ${idx === tabOrder.length - 1 ? 'disabled' : ''}>&#9660;</button>
-      `;
-      list.appendChild(row);
+      btn.addEventListener('dragstart', e => {
+        dragSrcIdx = idx;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => btn.classList.add('dragging'), 0);
+      });
+      btn.addEventListener('dragend', () => {
+        btn.classList.remove('dragging');
+        bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('drag-over'));
+      });
+      btn.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('drag-over'));
+        if (idx !== dragSrcIdx) btn.classList.add('drag-over');
+      });
+      btn.addEventListener('drop', e => {
+        e.preventDefault();
+        if (dragSrcIdx === null || dragSrcIdx === idx) return;
+        const moved = tabOrder.splice(dragSrcIdx, 1)[0];
+        tabOrder.splice(idx, 0, moved);
+        saveTabOrder();
+        renderTabBar();
+      });
+
+      bar.appendChild(btn);
     });
   }
 
@@ -2043,6 +2271,7 @@
     runningSourceNames = new Set(data && data.running ? data.running : []);
     if (currentTab === 'rbn') renderRbnControls();
     const connected = (data && data.connected || []).join(', ');
+    const errored   = (data && data.errored   || []).join(', ');
     switch (status) {
       case 'connected':
         badge.textContent = connected ? `Connected: ${connected}` : 'Connected';
@@ -2051,10 +2280,10 @@
         badge.textContent = 'Connecting…';
         btnConnect.disabled = true; btnDisconnect.disabled = false; break;
       case 'partial':
-        badge.textContent = connected ? `Partial: ${connected}` : 'Partial';
+        badge.textContent = `Partial — Error: ${errored || 'unknown'}`;
         btnConnect.disabled = true; btnDisconnect.disabled = false; break;
       case 'error':
-        badge.textContent = 'Error';
+        badge.textContent = errored ? `Error: ${errored}` : 'Error';
         btnConnect.disabled = false; btnDisconnect.disabled = true; break;
       default:
         badge.textContent = 'Disconnected';
@@ -2074,7 +2303,10 @@
       else if (msg.type === 'spot_update')  { updateSpotSources(msg.data.id, msg.data.sources); }
       else if (msg.type === 'pota_refresh') { potaSpots = msg.data || []; if (currentTab === 'pota') renderPotaTable(); else document.getElementById('potaSpotCount').textContent = `${potaSpots.length} spots`; }
       else if (msg.type === 'sota_refresh') { sotaSpots = msg.data || []; if (currentTab === 'sota') renderSotaTable(); else document.getElementById('sotaSpotCount').textContent = `${sotaSpots.length} spots`; }
-      else if (msg.type === 'special_events_refresh') { handleSeRefresh(msg.data); }
+      else if (msg.type === 'se_loading')          { seLoadingSources.add(msg.data.source); if (currentTab === 'se') renderSeTable(); }
+      else if (msg.type === 'special_events_refresh') { seLoadingSources.clear(); handleSeRefresh(msg.data); }
+      else if (msg.type === 'propagation')         { propData = msg.data; renderPropBar(); }
+      else if (msg.type === 'nets_refresh')        { netsData = msg.data; if (currentTab === 'nets') renderNetsTab(); updateNetsLastRefresh(); }
       else if (msg.type === 'rbn_spot')     { addRbnSpot(msg.data); }
       else if (msg.type === 'skimmer_list') {
         let changed = false;
@@ -2093,7 +2325,7 @@
       else if (msg.type === 'console')      { appendConsoleLine(msg.data.line, msg.data.parsed, msg.data.source, msg.data.http); }
       else if (msg.type === 'error')        { appendConsoleLine('ERROR: ' + msg.data.message, false, '', false); }
     };
-    ws.onclose = () => { wsReconnectTimer = setTimeout(openWebSocket, WS_RECONNECT_DELAY); };
+    ws.onclose = () => { seLoadingSources.clear(); wsReconnectTimer = setTimeout(openWebSocket, WS_RECONNECT_DELAY); };
     ws.onerror = () => {};
   }
 
@@ -2198,6 +2430,100 @@
       return sortState.dir === 'asc' ? cmp : -cmp;
     });
   }
+  // --- Propagation bar ---
+
+  const PROP_TOOLTIPS = {
+    ssn: {
+      title: 'SSN — Sunspot Number',
+      body: 'Sunspot Number is a rough measure of solar activity.\n\nHigher SSN usually means better support for the higher HF bands such as 15m, 12m, and 10m.\n\nTypical interpretation:\n  0–25: very low solar activity\n  25–75: low to moderate\n  75–150: good\n  150+: strong solar activity',
+      note: 'This does not guarantee propagation, but higher SSN usually helps raise the MUF.',
+    },
+    sfi: {
+      title: 'SFI — Solar Flux Index',
+      body: 'Solar Flux Index measures solar radio energy at 10.7 cm.\n\nIt is one of the best quick indicators for HF band support.\n\nTypical interpretation:\n  Below 70: poor high-band support\n  70–100: low to fair\n  100–150: decent to good\n  150+: strong high-band support',
+      note: 'Higher SFI often helps 20m, 17m, 15m, 12m, and 10m, but path, time of day, and season still matter.',
+    },
+    a: {
+      title: 'A — A-Index',
+      body: 'A-index shows geomagnetic activity averaged over a longer period.\n\nLower is usually better for HF. Higher values can mean disturbed conditions, absorption, fading, and weaker polar paths.\n\nTypical interpretation:\n  0–7: quiet\n  8–15: unsettled\n  16–29: active\n  30–49: minor storm\n  50+: storm conditions',
+      note: 'A lower A-index is usually better, especially for stable HF paths.',
+    },
+    kp: {
+      title: 'Kp — Planetary K-Index',
+      body: 'K/Kp measures short-term geomagnetic disturbance.\n\nLower is usually better. Higher values can damage HF conditions quickly, especially polar and high-latitude paths.\n\nTypical interpretation:\n  0–3: quiet to unsettled\n  4: active\n  5: minor geomagnetic storm\n  6: moderate storm\n  7–9: strong to extreme storm',
+      note: 'K/Kp changes faster than A-index, so it is useful for spotting sudden geomagnetic trouble.',
+    },
+    xray: {
+      title: 'X-Ray',
+      body: 'X-Ray level shows current solar flare activity.\n\nLarge flares can cause shortwave fadeouts, especially on the sunlit side of Earth.\n\nTypical interpretation:\n  A/B class: very low\n  C class: minor\n  M class: moderate flare activity\n  X class: major flare activity',
+      note: 'M and X class flares can cause sudden HF absorption or blackouts.',
+    },
+  };
+
+  function propSeverity(metric, val) {
+    if (val === null || val === undefined) return 'prop-unknown';
+    switch (metric) {
+      case 'ssn': return val >= 150 ? 'prop-good' : val >= 75 ? 'prop-good' : val >= 25 ? 'prop-fair' : 'prop-poor';
+      case 'sfi': return val >= 150 ? 'prop-good' : val >= 100 ? 'prop-good' : val >= 70  ? 'prop-fair' : 'prop-poor';
+      case 'a':   return val <= 7  ? 'prop-good' : val <= 15  ? 'prop-fair' : val <= 29  ? 'prop-poor' : 'prop-storm';
+      case 'kp':  return val <= 3  ? 'prop-good' : val <= 4   ? 'prop-fair' : val <= 5   ? 'prop-poor' : 'prop-storm';
+      case 'xray': {
+        const first = String(val)[0].toUpperCase();
+        return first === 'X' ? 'prop-storm' : first === 'M' ? 'prop-poor' : first === 'C' ? 'prop-fair' : 'prop-good';
+      }
+      default: return 'prop-unknown';
+    }
+  }
+
+  function renderPropBar() {
+    if (!propData) return;
+    const fields = [
+      { id: 'propSSN',  metric: 'ssn',  label: 'SSN',   val: propData.ssn },
+      { id: 'propSFI',  metric: 'sfi',  label: 'SFI',   val: propData.sfi },
+      { id: 'propA',    metric: 'a',    label: 'A',     val: propData.aIndex },
+      { id: 'propKp',   metric: 'kp',   label: 'Kp',    val: propData.kIndex },
+      { id: 'propXRay', metric: 'xray', label: 'X-Ray', val: propData.xRay },
+    ];
+    for (const f of fields) {
+      const el = document.getElementById(f.id);
+      if (!el) continue;
+      const display = (f.val !== null && f.val !== undefined) ? String(f.val) : '--';
+      el.querySelector('.pm-val').textContent = display;
+      el.className = `prop-metric ${propSeverity(f.metric, f.val)}`;
+    }
+    if (propData.fetched) {
+      const mins = Math.floor((Date.now() - propData.fetched) / 60000);
+      document.getElementById('propAge').textContent = mins < 2 ? 'just updated' : `updated ${mins}m ago`;
+    }
+  }
+
+  // Tooltip show/hide
+  const propTip = document.getElementById('propTooltip');
+  document.getElementById('clockBarSolar').addEventListener('mouseover', e => {
+    const metric = e.target.closest('.prop-metric');
+    if (!metric) { propTip.style.display = 'none'; return; }
+    const key = metric.dataset.metric;
+    const def = PROP_TOOLTIPS[key];
+    if (!def) return;
+    const valRaw = propData && metric.querySelector('.pm-val') ? metric.querySelector('.pm-val').textContent : '--';
+    const curVal = (valRaw && valRaw !== '--') ? valRaw : 'unavailable';
+    propTip.innerHTML =
+      `<div class="pt-title">${def.title}</div>` +
+      def.body.replace(/\n/g, '<br>') +
+      `<div class="pt-cur">Current value: ${curVal}</div>` +
+      `<div class="pt-note">${def.note}</div>`;
+    propTip.style.display = 'block';
+    const r = metric.getBoundingClientRect();
+    const tipW = 310;
+    let left = r.left;
+    if (left + tipW > window.innerWidth - 10) left = window.innerWidth - tipW - 10;
+    propTip.style.left = left + 'px';
+    propTip.style.top  = (r.bottom + 4) + 'px';
+  });
+  document.getElementById('clockBarSolar').addEventListener('mouseleave', () => {
+    propTip.style.display = 'none';
+  });
+
   function renderTable() {
     const visible = getSortedVisible(spots.filter(matchesFilters));
     document.getElementById('spotCount').textContent = `${visible.length} / ${spots.length} spots`;
@@ -2710,7 +3036,7 @@
     const windowType    = document.getElementById('dupeWindowSel').value;
 
     const panel = document.getElementById('dupePanel');
-    document.getElementById('dupePanelTitle').textContent = `Dupe Check — ${call}`;
+    document.getElementById('dupePanelTitle').textContent = `Dupe Mode — ${call}`;
     document.getElementById('dupeQrzSection').style.display = 'none';
     document.getElementById('dupeContactsBody').innerHTML = '';
     showDupeStatus('Looking up…', 'loading');
@@ -3474,23 +3800,34 @@
     return filtered;
   }
 
+  let seClickMap = [];
+
   function renderSeTable() {
     const qc = (qrzEnabled || dupeEnabled) ? ' qrz-link' : '';
     const visible = getSeVisible();
+    seClickMap = visible.map(item => item.ev);
     document.getElementById('seEventCount').textContent = `${visible.length} event${visible.length !== 1 ? 's' : ''}`;
 
     const frag = document.createDocumentFragment();
     if (!visible.length) {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td colspan="10" style="text-align:center;color:#555;padding:28px;font-style:italic">
-        ${specialEvents.length ? 'No events match the current filters.' : 'Loading special events…'}
-      </td>`;
+      let emptyMsg;
+      if (seLoadingSources.size > 0) {
+        emptyMsg = `Fetching special events from ${[...seLoadingSources].join(', ')}…`;
+      } else if (!specialEvents.length) {
+        emptyMsg = 'Connect to load special events.';
+      } else {
+        emptyMsg = 'No events match the current filters.';
+      }
+      tr.innerHTML = `<td colspan="10" style="text-align:center;color:#555;padding:28px;font-style:italic">${emptyMsg}</td>`;
       frag.appendChild(tr);
     } else {
-      for (const { ev, status } of visible) {
+      visible.forEach(({ ev, status }, eidx) => {
         const tr = document.createElement('tr');
         tr.dataset.band = (ev.bands || [])[0] || '';
         tr.dataset.mode = '';
+        tr.dataset.eidx = eidx;
+        tr.style.cursor = 'pointer';
         const [statusLabel, statusCls] = SE_STATUS_INFO[status] || [status.toUpperCase(), 'se-status-unknown'];
         const statusHtml  = `<span class="${statusCls}">${statusLabel}</span>`;
         const startDisplay = ev.startDate
@@ -3514,14 +3851,14 @@
           <td class="time">${startDisplay}${qualityBadge}</td>
           <td class="time">${endDisplay}</td>
           <td class="call${qc}" data-qrz="${esc(ev.callSign)}">${esc(ev.callSign)}</td>
-          <td title="${esc(ev.description)}">${esc(ev.title)}</td>
+          <td>${esc(ev.title)}</td>
           <td class="source">${esc(ev.locationText || [ev.city, ev.state].filter(Boolean).join(', '))}</td>
           <td style="font-size:10px">${esc(freqStr)}</td>
           <td style="font-size:10px">${esc(qslStr)}</td>
           <td>${webLink}</td>
           <td class="source">${esc(ev.source)}</td>`;
         frag.appendChild(tr);
-      }
+      });
     }
     const tbody = document.getElementById('seBody');
     tbody.textContent = '';
@@ -3547,6 +3884,70 @@
     renderTable();
   }
 
+  // --- SE Event Detail Popup ---
+
+  const sePopup = document.getElementById('seEventPopup');
+
+  function showSeEventPopup(ev, anchorEl) {
+    const [statusLabel, statusCls] = SE_STATUS_INFO[computeSeStatus(ev)] || ['', ''];
+    const loc  = ev.locationText || [ev.city, ev.state].filter(Boolean).join(', ') || '';
+    const freq = (ev.frequencies || []).join(', ') + (ev.bands && ev.bands.length ? ` (${ev.bands.join(', ')})` : '');
+    const qsl  = [ev.qslInfo, ev.certificateInfo].filter(Boolean).join(' / ') || '';
+    const web  = ev.website
+      ? `<a href="${esc(ev.website)}" target="_blank" rel="noopener">${esc(ev.website)}</a>` : '';
+    const row = (lbl, val) => val ? `<div class="sep-row"><span class="sep-lbl">${lbl}</span><span class="sep-val">${val}</span></div>` : '';
+
+    sePopup.innerHTML =
+      `<div class="sep-header">
+         <div>
+           <div class="sep-call">${esc(ev.callSign)}${ev.callSigns && ev.callSigns.length > 1 ? ' / ' + esc(ev.callSigns.slice(1).join(', ')) : ''}</div>
+           <span class="${statusCls}" style="font-size:10px">${statusLabel}</span>
+         </div>
+         <span class="sep-close" id="btnSePopupClose">&#x2715;</span>
+       </div>
+       <div class="sep-title">${esc(ev.title)}</div>
+       ${row('Dates', [ev.startDate, ev.endDate].filter(Boolean).join(' – '))}
+       ${row('Time', [ev.startTimeUtc, ev.endTimeUtc].filter(Boolean).join(' – '))}
+       ${row('Location', esc(loc))}
+       ${row('Entity', esc(ev.entity || ''))}
+       ${row('Freq/Band', esc(freq))}
+       ${row('QSL/Cert', esc(qsl))}
+       ${row('Website', web)}
+       ${row('Source', esc(ev.source))}
+       ${ev.description ? `<div class="sep-desc">${esc(ev.description)}</div>` : ''}`;
+
+    sePopup.style.display = 'block';
+
+    // Position near anchor, stay on screen
+    const r = anchorEl ? anchorEl.getBoundingClientRect() : null;
+    const pw = 480, ph = 300;
+    let top  = r ? r.bottom + 4 : window.innerHeight / 2 - ph / 2;
+    let left = r ? r.left      : window.innerWidth  / 2 - pw / 2;
+    if (top  + ph > window.innerHeight - 8) top  = Math.max(8, (r ? r.top - ph - 4 : window.innerHeight / 2 - ph / 2));
+    if (left + pw > window.innerWidth  - 8) left = window.innerWidth - pw - 8;
+    sePopup.style.top  = Math.max(8, top)  + 'px';
+    sePopup.style.left = Math.max(8, left) + 'px';
+
+    document.getElementById('btnSePopupClose').onclick = () => { sePopup.style.display = 'none'; };
+  }
+
+  // Close SE popup when clicking outside it
+  document.addEventListener('mousedown', e => {
+    if (sePopup.style.display !== 'none' && !sePopup.contains(e.target)) {
+      sePopup.style.display = 'none';
+    }
+  });
+
+  // SE body click → show popup (skip if clicking a link or QRZ span)
+  document.getElementById('seBody').addEventListener('click', e => {
+    if (e.target.tagName === 'A' || e.target.closest('a')) return;
+    if (e.target.classList.contains('qrz-link') || e.target.closest('.qrz-link')) return;
+    const tr = e.target.closest('tr[data-eidx]');
+    if (!tr) return;
+    const ev = seClickMap[parseInt(tr.dataset.eidx, 10)];
+    if (ev) showSeEventPopup(ev, tr);
+  });
+
   async function loadInitialSpecialEvents() {
     try {
       const r = await fetch('/api/special-events');
@@ -3555,6 +3956,400 @@
       if (data.events && data.events.length) handleSeRefresh(data);
     } catch (_) {}
   }
+
+  // --- Active Nets Tab ---
+
+  const NET_STATUS_INFO = {
+    ACTIVE:        ['ACTIVE',     'nets-status-active'],
+    HAPPENING_NOW: ['ACTIVE',     'nets-status-happening'],
+    UPCOMING:      ['SOON',       'nets-status-upcoming'],
+    SCHEDULED:     ['SCHED',      'nets-status-upcoming'],
+    FAVORITE:      ['FAV',        'nets-status-favorite'],
+    STALE:         ['STALE',      'nets-status-stale'],
+    UNKNOWN:       ['?',          'nets-status-unknown'],
+  };
+
+  function netStatusBadge(status) {
+    const [label, cls] = NET_STATUS_INFO[status] || ['?', 'nets-status-unknown'];
+    return `<span class="${cls}">${label}</span>`;
+  }
+
+  function netFavStar(net) {
+    const on = net.favorite ? ' active' : '';
+    return `<span class="net-fav-star${on}" data-netid="${esc(net.netId)}" title="${net.favorite ? 'Unfavorite' : 'Favorite'}">&#9733;</span>`;
+  }
+
+  function netActionButtons(net) {
+    const btns = [];
+    btns.push(`<button class="net-action-btn" data-action="search" data-netid="${esc(net.netId)}" data-freq="${esc(net.frequency || '')}" data-name="${esc(net.name || '')}">Spots</button>`);
+    if (net.frequencyKhz) {
+      btns.push(`<button class="net-action-btn" data-action="copyfreq" data-freq="${esc(net.frequency)}">Copy Freq</button>`);
+    }
+    if (net.openedBy) {
+      btns.push(`<button class="net-action-btn qrz-link" data-qrz="${esc(net.openedBy)}">${esc(net.openedBy)}</button>`);
+    }
+    if (net.sourceUrl) {
+      btns.push(`<a class="net-action-btn" href="${esc(net.sourceUrl)}" target="_blank" rel="noopener">Site</a>`);
+    }
+    return btns.join(' ');
+  }
+
+  function matchesNetsFilter(net) {
+    const fStatus = document.getElementById('netsFilterStatus').value;
+    const fBand   = document.getElementById('netsFilterBand').value;
+    const fMode   = document.getElementById('netsFilterMode').value;
+    const fText   = document.getElementById('netsFilterText').value.trim().toLowerCase();
+    const fFav    = document.getElementById('netsFilterFav').checked;
+    if (fStatus) {
+      if (fStatus === 'ACTIVE') {
+        if (net.status !== 'ACTIVE' && net.status !== 'HAPPENING_NOW') return false;
+      } else if (net.status !== fStatus) return false;
+    }
+    if (fBand   && net.band  !== fBand)   return false;
+    if (fMode   && net.mode  !== fMode)   return false;
+    if (fFav    && !net.favorite)         return false;
+    if (fText) {
+      const hay = [net.name, net.frequency, net.openedBy, net.location, net.mode, net.band, net.description]
+        .join(' ').toLowerCase();
+      if (!hay.includes(fText)) return false;
+    }
+    return true;
+  }
+
+  function renderNetsSection(tbodyId, nets, rowFn) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return 0;
+    const frag = document.createDocumentFragment();
+    let count = 0;
+    for (const net of nets) {
+      if (!matchesNetsFilter(net)) continue;
+      const tr = document.createElement('tr');
+      tr.dataset.netid = net.netId;
+      tr.style.cursor = 'pointer';
+      tr.innerHTML = rowFn(net);
+      frag.appendChild(tr);
+      count++;
+    }
+    tbody.textContent = '';
+    tbody.appendChild(frag);
+    const section = tbody.closest('.nets-section');
+    if (section) section.style.display = count ? '' : 'none';
+    return count;
+  }
+
+  function renderNetsTab() {
+    const all = netsData.nets || [];
+    const active   = all
+      .filter(n => n.status === 'ACTIVE' || n.status === 'HAPPENING_NOW')
+      .sort((a, b) => (a.status === 'ACTIVE' ? -1 : 1) - (b.status === 'ACTIVE' ? -1 : 1));
+    const upcoming = all.filter(n => ['UPCOMING','SCHEDULED'].includes(n.status));
+    const favs      = (netsData.favorites || []);
+
+    const cnt = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+
+    const activeCount = renderNetsSection('netsActiveBody_tbody', active, net =>
+      `<td>${netStatusBadge(net.status)}</td>
+       <td><span class="nets-name-link" data-netid="${esc(net.netId)}">${esc(net.name)}</span> ${netFavStar(net)}</td>
+       <td><b>${esc(net.frequency)}</b></td>
+       <td class="${bandClass(net.band)}">${esc(net.band)}</td>
+       <td>${net.mode ? modePill(net.mode) : ''}</td>
+       <td style="font-size:10px">${esc(net.startUtc || '')}</td>
+       <td>${esc(net.elapsed || '')}</td>
+       <td>${net.subscribers !== null && net.subscribers !== undefined ? net.subscribers : ''}</td>
+       <td style="font-size:10px">${esc(net.location || '')}</td>
+       <td>${netActionButtons(net)}</td>`);
+    cnt('netsActiveCount', activeCount);
+
+    const upCount = renderNetsSection('netsUpcomingBody_tbody', upcoming, net =>
+      `<td>${netStatusBadge(net.status)}</td>
+       <td><span class="nets-name-link" data-netid="${esc(net.netId)}">${esc(net.name)}</span> ${netFavStar(net)}</td>
+       <td style="font-size:10px">${esc(net.startUtc || '')}</td>
+       <td><b>${esc(net.frequency)}</b></td>
+       <td class="${bandClass(net.band)}">${esc(net.band)}</td>
+       <td>${net.mode ? modePill(net.mode) : ''}</td>
+       <td style="font-size:10px">${esc(net.location || '')}</td>
+       <td style="font-size:10px">${esc((net.sources || []).join(', '))}</td>
+       <td>${netActionButtons(net)}</td>`);
+    cnt('netsUpcomingCount', upCount);
+
+    // Favorites section — from stored favorites list
+    const favTbody = document.getElementById('netsFavBody_tbody');
+    if (favTbody) {
+      const ffrag = document.createDocumentFragment();
+      for (let i = 0; i < favs.length; i++) {
+        const f = favs[i];
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td><span class="net-fav-star active" data-favdel="${i}" title="Remove favorite">&#9733;</span></td>
+           <td>${esc(f.name)}</td>
+           <td style="font-size:10px">${esc(f.schedule || '')}</td>
+           <td><b>${esc(f.frequency || '')}</b></td>
+           <td>${esc(f.band || '')}</td>
+           <td>${esc(f.mode || '')}</td>
+           <td style="font-size:10px">${esc(f.notes || '')}</td>
+           <td><button class="net-action-btn" data-action="search" data-freq="${esc(f.frequency)}" data-name="${esc(f.name)}">Spots</button>
+               <button class="net-action-btn" data-action="editfav" data-favi="${i}">Edit</button></td>`;
+        ffrag.appendChild(tr);
+      }
+      favTbody.textContent = '';
+      favTbody.appendChild(ffrag);
+      const favSection = favTbody.closest('.nets-section');
+      if (favSection) favSection.style.display = favs.length ? '' : 'none';
+    }
+    cnt('netsFavCount', favs.length);
+
+    // Source health
+    renderNetsSourceHealth();
+  }
+
+  function renderNetsSourceHealth() {
+    const health = netsData.sourceHealth || {};
+    const tbody  = document.getElementById('netsHealthBody_tbody');
+    if (!tbody) return;
+    const frag = document.createDocumentFragment();
+    for (const [srcKey, h] of Object.entries(health)) {
+      const tr = document.createElement('tr');
+      const statusCls = h.status === 'OK' ? 'health-ok' : h.status === 'STALE' ? 'health-stale' :
+                        h.status === 'FAILED' ? 'health-failed' : 'health-disabled';
+      const age = h.lastRefresh ? `${Math.floor((Date.now() - h.lastRefresh) / 60000)}m ago` : 'Never';
+      tr.innerHTML =
+        `<td>${srcKey === 'netlogger' ? 'NetLogger' : 'NetFinder'}</td>
+         <td style="font-size:10px">${age}</td>
+         <td>${h.parsed || 0}</td>
+         <td>${h.accepted || 0}</td>
+         <td>${h.rejected || 0}</td>
+         <td class="${statusCls}">${h.status || 'UNKNOWN'}</td>
+         <td style="font-size:10px;color:#cc3333">${h.error ? esc(h.error) : ''}</td>`;
+      frag.appendChild(tr);
+    }
+    tbody.textContent = '';
+    tbody.appendChild(frag);
+  }
+
+  function updateNetsLastRefresh() {
+    const el = document.getElementById('netsLastRefresh');
+    if (!el) return;
+    const health = netsData.sourceHealth || {};
+    const last = Object.values(health).map(h => h.lastRefresh || 0).filter(Boolean);
+    if (!last.length) return;
+    const ago = Math.floor((Date.now() - Math.max(...last)) / 60000);
+    el.textContent = `Refreshed ${ago < 1 ? 'just now' : ago + 'm ago'}`;
+  }
+
+  // Net detail popup
+  const netPopup = document.getElementById('netDetailPopup');
+
+  function showNetDetailPopup(net, anchorEl) {
+    const [statusLabel, statusCls] = NET_STATUS_INFO[net.status] || ['?', 'nets-status-unknown'];
+    const row = (lbl, val) => val ? `<div class="ndp-row"><span class="ndp-lbl">${lbl}</span><span class="ndp-val">${val}</span></div>` : '';
+    const favLabel = net.favorite ? 'Unfavorite' : 'Add to Favorites';
+
+    netPopup.innerHTML =
+      `<div class="ndp-header">
+         <div>
+           <div class="ndp-name">${esc(net.name)}</div>
+           <span class="${statusCls}" style="font-size:10px">${statusLabel}</span>
+           ${(net.sources||[]).length > 1 ? `<span style="color:#5a7a8a;font-size:10px;margin-left:6px">${esc((net.sources||[]).join(', '))}</span>` : ''}
+         </div>
+         <span class="ndp-close" id="btnNetPopupClose">&#x2715;</span>
+       </div>
+       ${row('Frequency', `<b>${esc(net.frequency)}</b> kHz`)}
+       ${row('Band', esc(net.band))}
+       ${row('Mode', esc(net.mode))}
+       ${row('Started', esc(net.startUtc || ''))}
+       ${row('Elapsed', esc(net.elapsed || ''))}
+       ${row('Subscribers', net.subscribers !== null && net.subscribers !== undefined ? String(net.subscribers) : '')}
+       ${row('Opened By', net.openedBy ? `<span class="qrz-link" data-qrz="${esc(net.openedBy)}" style="cursor:pointer;color:#7eb8f7">${esc(net.openedBy)}</span>` : '')}
+       ${row('Location', esc(net.location || ''))}
+       ${row('Source', esc((net.sources||[net.source]).join(', ')))}
+       ${net.description ? `<div class="ndp-desc">${esc(net.description)}</div>` : ''}
+       <div class="ndp-actions">
+         <button class="net-action-btn" data-action="search" data-netid="${esc(net.netId)}" data-freq="${esc(net.frequency)}" data-name="${esc(net.name)}">Search Spots</button>
+         ${net.frequencyKhz ? `<button class="net-action-btn" data-action="copyfreq" data-freq="${esc(net.frequency)}">Copy Freq</button>` : ''}
+         <button class="net-action-btn" data-action="favtoggle" data-netid="${esc(net.netId)}">${favLabel}</button>
+         ${net.sourceUrl ? `<a class="net-action-btn" href="${esc(net.sourceUrl)}" target="_blank" rel="noopener">Open Website</a>` : ''}
+       </div>`;
+
+    netPopup.style.display = 'block';
+    const r = anchorEl ? anchorEl.getBoundingClientRect() : null;
+    const pw = 460, ph = 350;
+    let top  = r ? r.bottom + 4 : window.innerHeight / 2 - ph / 2;
+    let left = r ? r.left      : window.innerWidth  / 2 - pw / 2;
+    if (top  + ph > window.innerHeight - 8) top  = Math.max(8, r ? r.top - ph - 4 : window.innerHeight / 2 - ph / 2);
+    if (left + pw > window.innerWidth  - 8) left = window.innerWidth - pw - 8;
+    netPopup.style.top  = Math.max(8, top)  + 'px';
+    netPopup.style.left = Math.max(8, left) + 'px';
+
+    document.getElementById('btnNetPopupClose').onclick = () => { netPopup.style.display = 'none'; };
+  }
+
+  netPopup.addEventListener('click', e => {
+    const btn = e.target.closest('.net-action-btn[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'search') {
+      searchNetSpots(btn.dataset.freq || '', btn.dataset.name || '');
+    } else if (btn.dataset.action === 'copyfreq') {
+      navigator.clipboard.writeText(btn.dataset.freq || '').catch(() => {});
+    } else if (btn.dataset.action === 'favtoggle') {
+      toggleNetFavorite(btn.dataset.netid);
+      netPopup.style.display = 'none';
+    }
+  });
+
+  document.addEventListener('mousedown', e => {
+    if (netPopup && netPopup.style.display !== 'none' && !netPopup.contains(e.target)) {
+      netPopup.style.display = 'none';
+    }
+  });
+
+  // Search spots by net frequency + name
+  function searchNetSpots(freq, name) {
+    const khz = parseFloat(String(freq).replace(/[^0-9.]/g, ''));
+    if (!khz && !name) return;
+    searchResults = spots.filter(s => {
+      const sFreq = parseFloat(s.freq);
+      const freqMatch = khz && !isNaN(sFreq) && Math.abs(sFreq - khz) <= 3;
+      const nameMatch = name && s.comment && s.comment.toLowerCase().includes(name.toLowerCase().slice(0, 6));
+      return freqMatch || nameMatch;
+    });
+    renderSearchResults();
+    switchTab('search');
+    netPopup.style.display = 'none';
+  }
+
+  // Favorite toggle
+  async function toggleNetFavorite(netId) {
+    const net = (netsData.nets || []).find(n => n.netId === netId);
+    if (!net) return;
+    const favs = [...(netsData.favorites || [])];
+    const existIdx = favs.findIndex(f =>
+      f.name.toLowerCase().includes(net.name.toLowerCase().slice(0, 6)) ||
+      net.name.toLowerCase().includes(f.name.toLowerCase().slice(0, 6)));
+    if (existIdx >= 0) {
+      favs.splice(existIdx, 1);
+    } else {
+      favs.push({ name: net.name, frequency: net.frequency, band: net.band, mode: net.mode, schedule: '', notes: '' });
+    }
+    await saveFavorites(favs);
+  }
+
+  async function saveFavorites(favs) {
+    try {
+      const r = await fetch('/api/nets/favorites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ favorites: favs }),
+      });
+      if (r.ok) { /* server will broadcast nets_refresh */ }
+    } catch (e) {
+      console.error('saveFavorites:', e);
+    }
+  }
+
+  // Add favorite net dialog (simple prompt approach)
+  function openAddFavoriteDialog(prefill = {}) {
+    const name  = prompt('Net Name:', prefill.name || '');
+    if (!name) return;
+    const freq  = prompt('Frequency (MHz or kHz):', prefill.frequency || '');
+    const mode  = prompt('Mode (SSB, CW, FM, …):', prefill.mode || '');
+    const band  = prompt('Band (80m, 40m, …):', prefill.band || '');
+    const sched = prompt('Schedule (Daily, Mon/Wed/Fri, …):', prefill.schedule || '');
+    const notes = prompt('Notes:', prefill.notes || '');
+    const favs  = [...(netsData.favorites || [])];
+    favs.push({ name, frequency: freq || '', mode: mode || '', band: band || '', schedule: sched || '', notes: notes || '' });
+    saveFavorites(favs);
+  }
+
+  // Delegated click handler for the entire netsWrapper
+  document.getElementById('netsWrapper').addEventListener('click', e => {
+    // Section header collapse/expand
+    const hdr = e.target.closest('.nets-section-hdr');
+    if (hdr) {
+      const bodyId = hdr.dataset.section;
+      const body   = document.getElementById(bodyId);
+      if (body) body.classList.toggle('collapsed');
+      const toggle = hdr.querySelector('.nets-toggle');
+      if (toggle) toggle.textContent = body && body.classList.contains('collapsed') ? '▶' : '▼';
+      return;
+    }
+
+    // Favorite star toggle
+    const star = e.target.closest('.net-fav-star[data-netid]');
+    if (star) { toggleNetFavorite(star.dataset.netid); return; }
+
+    // Remove favorite
+    const delStar = e.target.closest('.net-fav-star[data-favdel]');
+    if (delStar) {
+      const idx  = parseInt(delStar.dataset.favdel, 10);
+      const favs = [...(netsData.favorites || [])];
+      favs.splice(idx, 1);
+      saveFavorites(favs);
+      return;
+    }
+
+    // Action buttons
+    const btn = e.target.closest('.net-action-btn[data-action]');
+    if (btn) {
+      if (btn.dataset.action === 'search') {
+        searchNetSpots(btn.dataset.freq || '', btn.dataset.name || '');
+      } else if (btn.dataset.action === 'copyfreq') {
+        navigator.clipboard.writeText(btn.dataset.freq || '').catch(() => {});
+      } else if (btn.dataset.action === 'favtoggle') {
+        toggleNetFavorite(btn.dataset.netid);
+        netPopup.style.display = 'none';
+      } else if (btn.dataset.action === 'editfav') {
+        const idx  = parseInt(btn.dataset.favi, 10);
+        const fav  = (netsData.favorites || [])[idx];
+        if (!fav) return;
+        const favs = [...(netsData.favorites || [])];
+        const name  = prompt('Net Name:', fav.name);
+        if (!name) return;
+        favs[idx] = { ...fav, name,
+          frequency: prompt('Frequency:', fav.frequency) || fav.frequency,
+          mode:      prompt('Mode:', fav.mode) || fav.mode,
+          band:      prompt('Band:', fav.band) || fav.band,
+          schedule:  prompt('Schedule:', fav.schedule) || fav.schedule,
+          notes:     prompt('Notes:', fav.notes) || fav.notes,
+        };
+        saveFavorites(favs);
+      }
+      return;
+    }
+
+    // Net name link → detail popup
+    const nameLink = e.target.closest('.nets-name-link[data-netid]');
+    if (nameLink) {
+      const net = (netsData.nets || []).find(n => n.netId === nameLink.dataset.netid);
+      if (net) showNetDetailPopup(net, nameLink);
+      return;
+    }
+
+    // Row click → detail popup
+    const tr = e.target.closest('tr[data-netid]');
+    if (tr && !e.target.closest('a') && !e.target.closest('button') && !e.target.closest('.qrz-link') && !e.target.closest('.net-fav-star')) {
+      const net = (netsData.nets || []).find(n => n.netId === tr.dataset.netid);
+      if (net) showNetDetailPopup(net, tr);
+    }
+  });
+
+  document.getElementById('btnAddFavoriteNet').addEventListener('click', () => openAddFavoriteDialog());
+
+  // Nets filter event listeners
+  ['netsFilterStatus', 'netsFilterBand', 'netsFilterMode'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => { if (currentTab === 'nets') renderNetsTab(); });
+  });
+  document.getElementById('netsFilterText').addEventListener('input', () => { if (currentTab === 'nets') renderNetsTab(); });
+  document.getElementById('netsFilterFav').addEventListener('change',  () => { if (currentTab === 'nets') renderNetsTab(); });
+  document.getElementById('netsBtnClear').addEventListener('click', () => {
+    document.getElementById('netsFilterStatus').value = '';
+    document.getElementById('netsFilterBand').value   = '';
+    document.getElementById('netsFilterMode').value   = '';
+    document.getElementById('netsFilterText').value   = '';
+    document.getElementById('netsFilterFav').checked  = false;
+    if (currentTab === 'nets') renderNetsTab();
+  });
+  document.getElementById('netsBtnRefresh').addEventListener('click', () => {
+    fetch('/api/nets/refresh', { method: 'POST' }).catch(() => {});
+  });
 
   // Header sort for Special Events table
   const handleSeHeader = makeSortHandler(seSortState,
@@ -4111,35 +4906,6 @@
     if (btn) switchTab(btn.dataset.tab);
   });
 
-  // Tab order UI
-  document.getElementById('tabOrderList').addEventListener('click', e => {
-    const btn = e.target.closest('.tab-order-btn');
-    if (!btn) return;
-    const idx = parseInt(btn.dataset.idx, 10);
-    if (btn.dataset.dir === 'up' && idx > 0) {
-      [tabOrder[idx - 1], tabOrder[idx]] = [tabOrder[idx], tabOrder[idx - 1]];
-    } else if (btn.dataset.dir === 'down' && idx < tabOrder.length - 1) {
-      [tabOrder[idx], tabOrder[idx + 1]] = [tabOrder[idx + 1], tabOrder[idx]];
-    }
-    renderTabBar();
-    renderTabOrderUI();
-  });
-  document.getElementById('btnSaveTabOrder').addEventListener('click', () => {
-    saveTabOrder();
-    renderTabBar();
-    const msg = document.getElementById('tabOrderMsg');
-    msg.textContent = 'Saved.';
-    setTimeout(() => { msg.textContent = ''; }, 2000);
-  });
-  document.getElementById('btnResetTabOrder').addEventListener('click', () => {
-    tabOrder = [...DEFAULT_TAB_ORDER];
-    saveTabOrder();
-    renderTabBar();
-    renderTabOrderUI();
-    const msg = document.getElementById('tabOrderMsg');
-    msg.textContent = 'Reset to default.';
-    setTimeout(() => { msg.textContent = ''; }, 2000);
-  });
 
   // Drag-to-resize for 13 Colonies splitter
   (function() {
@@ -4177,6 +4943,66 @@
     });
   })();
 
+  // --- Resizable columns ---
+
+  function makeColsResizable(table) {
+    if (!table || table.dataset.resizable) return;
+    table.dataset.resizable = '1';
+
+    // Switch to fixed layout using current computed widths
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+
+    // Let the browser auto-size first, then lock in widths
+    requestAnimationFrame(() => {
+      // Compute sum and constrain to table width
+      const tableW = table.offsetWidth;
+      const rawWidths = ths.map(th => th.offsetWidth);
+      const sum = rawWidths.reduce((a, b) => a + b, 0);
+      const scale = sum > 0 ? tableW / sum : 1;
+      ths.forEach((th, i) => {
+        th.style.width = Math.floor(rawWidths[i] * scale) + 'px';
+        th.style.maxWidth = '';
+        th.style.overflow = 'hidden';
+        th.style.textOverflow = 'ellipsis';
+      });
+      table.style.tableLayout = 'fixed';
+      table.style.width = '100%';
+
+      // Add resize handles
+      ths.forEach((th, i) => {
+        if (i === ths.length - 1) return; // skip last column
+        const handle = document.createElement('div');
+        handle.className = 'col-resize-handle';
+        th.appendChild(handle);
+
+        handle.addEventListener('mousedown', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          const startX = e.pageX;
+          const startW = th.offsetWidth;
+          handle.classList.add('dragging');
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+
+          const onMove = ev => {
+            const newW = Math.max(30, startW + (ev.pageX - startX));
+            th.style.width = newW + 'px';
+          };
+          const onUp = () => {
+            handle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+      });
+    });
+  }
+
   // --- Init ---
 
   loadTabOrder();
@@ -4187,6 +5013,12 @@
   initQrzStatus();
   initDupeConfig();
   loadInitialSpecialEvents();
+
+  // Apply resizable columns to all spot tables
+  ['spotsTable', 'potaTable', 'sotaTable', 'rbnTable', 'coloniesTable', 'fdTable', 'seTable', 'searchTable',
+   'netsActiveTable', 'netsUpcomingTable', 'netsFavTable', 'netsHealthTable'].forEach(id => {
+    makeColsResizable(document.getElementById(id));
+  });
 </script>
 </body>
 </html>

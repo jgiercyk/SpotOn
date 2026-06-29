@@ -1,5 +1,6 @@
 node_modules/
 .claude/
 dupe-config.json
+nets-config.json
 *.env
 .env*

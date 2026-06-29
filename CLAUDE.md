@@ -20,8 +20,10 @@ Current goals:
 * Display parsed spots in live sortable tables with filters.
 * Provide a global Search All Sources feature.
 * Display UTC and local/configurable clocks.
+* Display current solar propagation conditions (SSN, SFI, A, Kp, X-Ray) with per-metric tooltips.
 * Support optional QRZ XML callsign lookups.
 * Allow the user to set and persist dashboard tab order.
+* Show active amateur radio nets from NetLogger (live) and NetFinder (scheduled), with manual favorites.
 
 ---
 
@@ -73,10 +75,11 @@ Local Backend (Node.js / Express)
       ├── HTTP Scraping      → ARRL Special Events (HTML)
       ├── HTTP Scraping      → VA3RJ DX Calendar (HTML)
       ├── HTTP Scraping      → 425 DX News Calendar (HTML)
-      └── PowerShell / ADODB → HRD Logbook (.mdb)
+      ├── PowerShell / ADODB → HRD Logbook (.mdb)
+      └── HTTP Polling       → HamQSL Solar XML (propagation data)
 ```
 
-The backend is responsible for: opening telnet connections, polling HTTP/API sources, parsing each source format separately, normalizing and deduplicating spots, logging into telnet clusters, sending structured objects to the browser, performing optional QRZ XML lookups, and querying HRD Logbook for dupe checks.
+The backend is responsible for: opening telnet connections, polling HTTP/API sources, parsing each source format separately, normalizing and deduplicating spots, logging into telnet clusters, sending structured objects to the browser, performing optional QRZ XML lookups, querying HRD Logbook for dupe checks, and fetching solar propagation data (HamQSL XML, every 15 minutes).
 
 The frontend must never communicate directly with telnet servers or expose QRZ credentials.
 
@@ -84,11 +87,13 @@ The frontend must never communicate directly with telnet servers or expose QRZ c
 
 # User Interface
 
-Header: Configure | Connect | Disconnect | [Dupe Check ☐] [Dupe Panel] | Connected
+Header: Configure | Connect | Disconnect | [Dupe Mode ☐] [Dupe Panel] | Connected
 
 Clock bar: UTC clock | Local clock | Search All [input ✕] [Search]
 
-Tabs: Live Spots | POTA | SOTA | RBN | Special Events | 13 Colonies | Field Day | Search | Console | Configuration
+Clock bar: UTC clock | Local clock | Solar SSN {n} | SFI {n} | A {n} | Kp {n} | X-Ray {class} | Search All [input ✕] [Search]
+
+Tabs: Live Spots | POTA | SOTA | RBN | Special Events | 13 Colonies | Field Day | Search | Console
 
 Tab order is user-configurable and persisted in localStorage. See **Tab Order** section.
 
@@ -118,6 +123,30 @@ Links, clickable callsigns, and interactive elements must be visually obvious.
 # Clocks
 
 Two clocks always visible. UTC clock (always UTC). Configurable clock (user-selectable time zone, 12/24-hour format, default America/New_York 12-hour). Clock settings saved to localStorage.
+
+---
+
+# Propagation Bar
+
+A compact bar between the clock bar and tab bar showing current solar/geomagnetic conditions.
+
+**Placement:** Inline in the clock bar, between the Local clock and the Search All input. Separated by borders. No separate bar row.
+
+**Display:** `Solar SSN {n} | SFI {n} | A {n} | Kp {n} | X-Ray {class}` — age indicator after X-Ray.
+
+**Data source:** HamQSL solar XML (`https://www.hamqsl.com/solarxml.php`). Backend polls every 15 minutes at startup (not tied to Connect). Cached data sent to new WS clients on connect. WS message type: `propagation`.
+
+**Metrics fetched from XML tags:** `<sunspots>` (SSN), `<solarflux>` (SFI), `<aindex>`, `<kindex>`, `<xray>`.
+
+**Severity coloring** (subtle classes, not garish):
+- SSN/SFI: `prop-good` ≥ 75 / ≥ 100, `prop-fair` ≥ 25 / ≥ 70, `prop-poor` below those, `prop-unknown` if missing.
+- A-index: `prop-good` ≤ 7, `prop-fair` ≤ 15, `prop-poor` ≤ 29, `prop-storm` 30+.
+- Kp: `prop-good` ≤ 3, `prop-fair` ≤ 4, `prop-poor` ≤ 5, `prop-storm` 6+.
+- X-Ray: `prop-good` A/B, `prop-fair` C, `prop-poor` M, `prop-storm` X.
+
+**Tooltips:** Each metric span has `data-metric` attribute. A single shared `#propTooltip` div is positioned on `mouseover` and hidden on `mouseleave`. Tooltips include the metric's full name, plain-English explanation, value ranges, current value, and a reminder that these are indicators, not guarantees. Current value is read live from the metric span at hover time.
+
+The bar must remain compact — no height increase to the overall layout. No click popup on individual metrics; the tooltip is hover-only.
 
 ---
 
@@ -574,7 +603,6 @@ Each tab has a stable internal ID (`TAB_DEFS` in index.html) distinct from its v
 | fd | Field Day |
 | search | Search |
 | console | Console |
-| config | Layout |
 
 ## Behavior
 
@@ -583,20 +611,19 @@ On startup:
 2. Validate against existing tab IDs — drop unknown IDs, append missing ones at the end.
 3. Render tabs in the resulting order via `renderTabBar()`.
 
-Tab bar is rebuilt dynamically by `renderTabBar()` — do not add static event listeners to individual tab buttons. The tab bar uses a single delegated click listener on `#tabBar`.
+Tab bar is rebuilt dynamically by `renderTabBar()` — do not add static event listeners to individual tab buttons. The tab bar uses a single delegated click listener on `#tabBar` for switching; drag handlers are attached directly inside `renderTabBar()`. Tab buttons use `cursor: default` — the draggable attribute would otherwise produce an open-hand cursor, so `cursor: default` is set explicitly on `.tab-btn` and overrides it. Only `.tab-btn.dragging` uses `cursor: grabbing`.
 
-Default order: spots → pota → sota → rbn → se → colonies → fd → search → console → config.
+Default order: spots → pota → sota → rbn → se → colonies → fd → search → console.
 
-## Layout Tab
+## Drag-and-Drop Reordering
 
-The **Layout** tab (`data-tab="config"`, `id="configWrapper"`) contains the tab ordering UI:
+Tabs are reordered by dragging directly in the tab bar. There is no separate Layout tab.
 
-- List of all tabs in current order with ▲/▼ Move Up / Move Down buttons
-- **Save Order** button — persists to localStorage and re-renders the tab bar
-- **Reset to Default** button — restores default order, saves, and re-renders
-- Confirmation message fades after 2 seconds
-
-Moving a tab up/down re-renders the list immediately for preview; order is not written to localStorage until Save is clicked.
+- Each tab button has `draggable="true"` and drag event handlers set in `renderTabBar()`
+- `dragstart` records the source index in a closure-scoped `dragSrcIdx`
+- `dragover` highlights the drop target with `.drag-over` (left box-shadow)
+- `drop` splices `tabOrder`, saves to localStorage, and calls `renderTabBar()`
+- `.dragging` class (opacity 0.35) added via `setTimeout(..., 0)` to avoid hiding the drag ghost
 
 ---
 
@@ -632,7 +659,7 @@ Must tolerate variable spacing, missing comments, and formatting differences. Ma
 * Export dupe-check results
 * HRD / JTAlert integration for 13 Colonies or Field Day (beyond dupe check)
 * SE sources: QRZ forums, RSS feeds, social media, generic web search
-* Special Events drag-and-drop tab reordering in the Layout tab (Move Up/Down is sufficient for v1)
+* Tab reordering reset-to-default gesture (currently requires clearing localStorage)
 * 1x1 callsign DB if impractical to scrape (non-fatal)
 
 ---
@@ -656,14 +683,43 @@ All items below are implemented in the working prototype:
 13. 13 Colonies tab with 16 stations, worked matrix, spot forwarding, and localStorage persistence.
 14. Field Day tab with 7 band sub-tabs + All totals tab, 85-section matrix (official ARRL W/VE list, alpha by code), spot forwarding, Clear button with confirmation, and localStorage persistence.
 15. HRD Logbook dupe check: floating panel with manual callsign entry, band/mode/window filter controls (persistent), all-contacts display with selective dupe/worked highlighting, QRZ info integration.
-16. Header Dupe Check toggle and Dupe Panel button for quick access.
+16. Header "Dupe Mode" toggle and Dupe Panel button for quick access. (Checkbox label is "Dupe Mode", not "Dupe Check".)
 17. UTC and configurable local clock.
 18. QRZ XML lookup (click or ad hoc) with credentials stored server-side.
 19. Search All and QRZ lookup inputs visually distinct (blue vs amber themes with ✕ clear buttons).
 20. 6m, 2m, and 70cm band/sub-band detection.
-21. Source-aware connection status (Gray/Yellow/Green/Orange/Red).
-22. Special Events tab: ARRL HTML polling + 425 DX News polling, 7-status classification with date-quality tracking, partial/unknown dates displayed as "Unknown" (never as normal upcoming/active), sortable table with Source column, SE badge in Live Spots, Search All integration, QRZ click support, manual Refresh button (throttled), cached events sent to new WS clients on connect.
-23. Layout tab: user-configurable tab order with Move Up/Down buttons, Save Order, and Reset to Default; persisted in localStorage; tab bar rebuilt dynamically on startup and on save.
+21. Source-aware connection status (Gray/Yellow/Green/Orange/Red); errored source names shown in badge.
+22. Special Events tab: ARRL HTML polling + 425 DX News polling, 7-status classification with date-quality tracking, partial/unknown dates displayed as "Unknown" (never as normal upcoming/active), sortable table with Source column, SE badge in Live Spots, Search All integration, QRZ click support, manual Refresh button (throttled), cached events sent to new WS clients on connect. SE tab shows loading source name(s) while fetching; "Connect to load special events." when idle and empty.
+23. Drag-and-drop tab reordering: tabs draggable directly in the tab bar; order persisted in localStorage; tab bar rebuilt dynamically on startup and after each drop.
+24. Propagation metrics: SSN, SFI, A-index, Kp, X-Ray from HamQSL XML (polled every 15 min). Inline in clock bar. Severity color classes. Per-metric hover tooltips with operator-friendly explanations and current value.
+25. Special Events rows are clickable: clicking a row opens a detail popup with full event info (dates, location, frequencies, QSL, website, description). Popup closes on outside click or ✕. Links and QRZ callsigns are excluded from popup trigger.
+26. Resizable columns: all spot tables (Live Spots, POTA, SOTA, RBN, 13 Colonies, Field Day, Special Events, Search) use table-layout:fixed after init; drag handles on each column header allow user resizing. Cells clip with text-overflow:ellipsis. Default widths scaled to fit viewport width.
+
+27. Active Nets tab (ID: `nets`, label: `Active Nets`): NetLogger HTML scraping (every 15 min, with www/non-www fallback) + NetFinder HTML scraping (every 15 min). Common normalized net object. Merge/dedup by name+freq. 4 sections: Active Now (ACTIVE + HAPPENING_NOW combined, same green badge), Coming Soon, Favorites, Source Health. Sections hidden when empty (no headers shown for empty tables). Filter bar (status/band/mode/text/fav-only). Row click or name click → detail popup. "Spots" action (row button and popup button) searches live spot cache by freq ±3 kHz + net name, switches to Search tab. Popup has its own delegated click handler since it lives outside #netsWrapper. Favorites stored in `nets-config.json` via POST /api/nets/favorites. Section headers collapse/expand. Source health table with per-source status. Both sources fault-tolerant with stale cache fallback. Tab buttons use default cursor (not pointer).
+
+## Active Nets
+
+Tab ID: `nets`. Label: `Active Nets`. Participates in custom tab ordering.
+
+**Sources:**
+- **NetLogger** (`https://www.netlogger.org/` with `https://netlogger.org/` fallback): scrapes HTML table of currently active nets. Confidence 1.00 (ACTIVE). Polls every 15 minutes. On failure: mark cached nets as STALE (confidence 0.60), keep showing them.
+- **NetFinder** (`https://netfinder.radio/`): scrapes scheduled nets. Confidence 0.80 (HAPPENING_NOW) / 0.75 (UPCOMING). Polls every 15 minutes. On failure: mark stale.
+
+**Config file:** `nets-config.json` — settings + favorites array. Gitignored.
+
+**Net status values:** `ACTIVE`, `HAPPENING_NOW`, `UPCOMING`, `SCHEDULED`, `FAVORITE`, `STALE`, `UNKNOWN`
+
+**Section layout:** Active Now section combines `ACTIVE` and `HAPPENING_NOW` nets (ACTIVE sorted first). Both show an identical green "ACTIVE" badge — `nets-status-happening` uses the same background/color as `nets-status-active`. Sections with no matching nets are hidden entirely — no empty table headers are displayed.
+
+**Merge rule:** same-name (+freq within 2 kHz) nets from different sources are merged; NetLogger wins for status/subscribers/elapsed.
+
+**Favorites:** User adds via "+ Add Favorite Net" button (prompt-based dialog). Stored as array in `nets-config.json`. Backend persists via POST `/api/nets/favorites`. Favorites shown in Favorites section even when not spotted by NetLogger/NetFinder.
+
+**Detail popup:** Clicking net name or row shows popup with all fields + Search Spots, Copy Freq, Favorite toggle, Open Website buttons.
+
+**Search Spots action:** filters `spots[]` array for freq ±3 kHz + comment containing net name, injects into searchResults, switches to Search tab.
+
+**Parsers are HTML scrapers** — if site layouts change, parser may return 0 nets. Console tab shows `[nets]` log lines for diagnosis.
 
 ## Next Milestone
 
@@ -675,5 +731,8 @@ Items not yet implemented:
 * Special Events tab: Heard Today section (SE callsigns spotted live today).
 * Special Events tab: Source Health section (per-source parse/accept/reject counts).
 * HRD worked status integrated into Special Events tab.
+* Active Nets: ARRL Net Directory integration.
+* Active Nets: HRD check-in history lookup for net-control callsigns.
+* Active Nets: radio tuning integration.
 
 The emphasis is on clean, maintainable code that can be expanded in future versions.
