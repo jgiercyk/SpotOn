@@ -585,6 +585,7 @@
     flex: 1; overflow-y: auto; overflow-x: auto;
     padding: 12px 16px; display: flex; gap: 32px; align-items: flex-start;
   }
+  #coloniesMatrixLeft, #coloniesMatrixRight { flex-shrink: 0; }
   .col-matrix-table { border-collapse: collapse; }
   .col-matrix-table th {
     padding: 4px 16px 6px; text-align: center; font-size: 11px;
@@ -592,12 +593,12 @@
   }
   .col-matrix-table th.station-th { text-align: left; padding-left: 0; padding-right: 8px; }
   .col-matrix-table th.loc-th { text-align: left; padding-right: 18px; }
-  .col-matrix-table td { padding: 3px 16px; border-top: 1px solid #1a1a2a; text-align: center; }
+  .col-matrix-table td { padding: 3px 16px; border-top: 1px solid #1a1a2a; text-align: center; overflow: visible; text-overflow: clip; max-width: none; }
   .col-matrix-table td.call-col {
     font-family: Consolas, monospace; font-weight: 700; font-size: 13px;
     color: #fff; white-space: nowrap; padding-left: 0; padding-right: 8px; text-align: left;
   }
-  .col-matrix-table td.loc-col { color: #888; font-size: 11px; white-space: nowrap; padding-right: 18px; text-align: left; }
+  .col-matrix-table td.loc-col { color: #aaa; font-size: 12px; white-space: nowrap; overflow: visible; text-overflow: clip; max-width: none; min-width: 160px; padding-right: 18px; text-align: left; }
   .mat-light {
     cursor: pointer; font-size: 20px; user-select: none; display: inline-block; line-height: 1;
     transition: color 0.12s;
@@ -612,6 +613,7 @@
   #coloniesTable { width: 100%; border-collapse: collapse; font-size: 12px; }
   #coloniesTable thead { position: sticky; top: 0; background: #1a1a2e; z-index: 10; }
   #coloniesTable th { text-align: left; padding: 6px 10px; color: #7eb8f7; font-weight: 600; border-bottom: 1px solid #2a2a4a; white-space: nowrap; }
+  #coloniesTable th[data-ccol="location"] { min-width: 165px; }
   td.colony-call { color: #fff; font-weight: 700; font-family: Consolas, monospace; font-size: 13px; }
   td.colony-loc { color: #888; font-size: 11px; }
   .award-mode-Voice    { color: #44cc44; font-weight: 600; }
@@ -3338,7 +3340,7 @@
     const tbody = document.createElement('tbody');
     for (const c of cols) {
       const tr = document.createElement('tr');
-      let html = `<td class="call-col">${esc(c.call)}</td><td class="loc-col">${esc(c.loc)}</td>`;
+      let html = `<td class="call-col">${esc(c.call)}</td><td class="loc-col" title="${esc(c.loc)}">${esc(c.loc)}</td>`;
       for (const mode of AWARD_MODES) {
         const worked = !!w[workedKey(c.call, mode)];
         html += `<td><span class="mat-light ${worked ? 'worked' : 'wanted'}" data-call="${esc(c.call)}" data-mode="${esc(mode)}" title="${esc(c.call)} ${esc(mode)}">&#9679;</span></td>`;

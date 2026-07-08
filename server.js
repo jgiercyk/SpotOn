@@ -13,11 +13,12 @@ const { WebSocketServer, WebSocket } = require('ws');
 const PORT = 3000;
 const DEDUP_WINDOW_MS = 2 * 60 * 60 * 1000; // 2-hour dedup window covers full HTTP backlog
 
-const RE_LIVE     = /^DX de ([\w\d/\-]+):\s+([\d.]+)\s+([\w\d/\-]+)\s+(.*?)\s+(\d{4}Z)\s*$/;
-const RE_HIST     = /^([\d.]+)\s+([\w\d/\-]+)\s+(\d{2}-[A-Za-z]{3}-\d{4})\s+(\d{4}Z)\s+(.*?)\s*<([\w\d/\-]+)>\s*$/;
-const RE_HIST_ALT = /^([\d.]+)\s+([\w\d/\-]+)\s+(\d{2}-[A-Za-z]{3}-\d{4})\s+(\d{4}Z)\s+(.*?)\s*\[([\w\d/\-]+)\]\s*$/;
+// DX Spider sh/dx history appends " DD Mon" after the time; make that optional
+const RE_LIVE     = /^DX de ([\w\d/\-]+):\s+([\d.]+)\s+([\w\d/\-]+)\s+(.*?)\s+(\d{4}Z)(?:\s+(\d{1,2})\s+([A-Za-z]{3}))?\s*$/;
+const RE_HIST     = /^([\d.]+)\s+([\w\d/\-]+)\s+(\d{1,2}-[A-Za-z]{3}-\d{4})\s+(\d{4}Z)\s+(.*?)\s*<([\w\d/\-]+)>\s*$/;
+const RE_HIST_ALT = /^([\d.]+)\s+([\w\d/\-]+)\s+(\d{1,2}-[A-Za-z]{3}-\d{4})\s+(\d{4}Z)\s+(.*?)\s*\[([\w\d/\-]+)\]\s*$/;
 // DX Summit: SPOTTER  FREQ  DXCALL  COMMENT  HHMM  DD  MON  (no year, no Z on time)
-const RE_DXSUMMIT = /^(\S+)\s+([\d.]+)\s+(\S+)(.*?)\s+(\d{4})\s+(\d{1,2})\s+([A-Za-z]{3})\s*$/;
+const RE_DXSUMMIT = /^(\S+)\s+([\d.]+)\s+(\S+)(.*?)\s*(\d{4})\s+(\d{1,2})\s+([A-Za-z]{3})\s*$/;
 // RBN: DX de SKIMMER:  FREQ  HEARDCALL  MODE  SIGNAL dB [SPEED UNIT]  [TYPE]  HHMMZ
 // Skimmer callsigns may include -# or -@ suffixes; TYPE (CQ/NCDXF/etc.) is absent on FT8 spots
 const RE_RBN = /^DX de ([\w\d\/\-#@]+):\s+([\d.]+)\s+([\w\d\/\-]+)\s+(\w+)\s+(-?\d+)\s+dB(?:\s+(\d+)\s+\w+)?(?:\s+(\w+))?\s+(\d{4}Z)/;
@@ -131,8 +132,9 @@ function tryParseSpot(line) {
   try {
     let m = RE_LIVE.exec(line);
     if (m) {
-      const [, spotter, freq, call, comment, time] = m;
-      return buildSpot(freq, call, '', time, comment, spotter, line);
+      const [, spotter, freq, call, comment, time, day, mon] = m;
+      const date = (day && mon) ? `${day.padStart(2,'0')}-${mon}-${new Date().getUTCFullYear()}` : '';
+      return buildSpot(freq, call, date, time, comment, spotter, line);
     }
     m = RE_HIST.exec(line);
     if (m) {
@@ -495,10 +497,15 @@ async function pollHttpSource(srcName) {
 
   try {
     const body = await httpGet(src.config.url);
-    const text = stripHtml(body);
-    const candidates = text.split('\n').map(l => l.trim()).filter(l => l.length > 8);
+    const lfCount = (body.match(/\n/g) || []).length;
+    const crCount = (body.match(/\r/g) || []).length;
+    // Split by line FIRST then strip HTML on each line individually.
+    // Applying stripHtml to the whole body lets <[^>]+> match across newlines
+    // when a spot comment contains a bare '<' (e.g. grid path <ES>) — this was
+    // collapsing 100 spots into a single unparseable string.
+    const candidates = body.split('\n').map(l => stripHtml(l).trim()).filter(l => l.length > 8);
 
-    httpLog(srcName, `Fetched ${body.length} bytes → ${candidates.length} candidate lines`);
+    httpLog(srcName, `Fetched ${body.length} bytes  LF=${lfCount} CR=${crCount}  → ${candidates.length} candidate lines`);
 
     // Show first 8 raw lines so format is visible in Console tab
     for (const line of candidates.slice(0, 8)) {

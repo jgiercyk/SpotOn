@@ -67,7 +67,9 @@
       "Bash(C:\\\\Program Files\\\\nodejs\\\\node.exe *)",
       "Bash(\"C:\\\\Program Files\\\\nodejs\\\\node.exe\" --check \"C:\\\\Users\\\\jim\\\\claudedxspots\\\\server.js\")",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "PowerShell(node C:\\\\Users\\\\jim\\\\claudedxspots\\\\debug\\\\test-dxsummit.js 2>&1)",
+      "PowerShell(node C:\\\\Users\\\\jim\\\\claudedxspots\\\\debug\\\\test-dxsummit.js 2>&1 | Select-String -Pattern \"Fetched|body\\\\[|afterStrip|candidate|Parse Results|Parsed OK|Failed|By regex\" | ForEach-Object { $_.Line })"
     ]
   }
 }
